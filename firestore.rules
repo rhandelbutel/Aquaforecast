@@ -22,7 +22,6 @@ service cloud.firestore {
 
     // Ensure regular users cannot change admin-only fields on /users docs
     function userDoesNotChangeAdminFields() {
-      // If the client isn't admin, protected fields (status, role, approvals, studentId) must remain unchanged
       return isAdmin() ||
         (
           (!('status' in request.resource.data) || request.resource.data.status == resource.data.status) &&
@@ -35,46 +34,45 @@ service cloud.firestore {
         );
     }
 
-    // ---------- USERS ----------
-    // Each user has a doc: /users/{userId}
-    // - Users can create their own doc at sign-up and read/update their own doc
-    // - Admins can read/update any user's doc (to approve/reject, set role, etc.)
-    match /users/{userId} {
-      allow create: if isOwner(userId);
-
-      allow read: if isOwner(userId) || isAdmin();
-
-      // Regular users can update their own non-admin fields; admins can update anything.
-      allow update: if (
-        (isOwner(userId) && userDoesNotChangeAdminFields()) ||
-        isAdmin()
+    // 🔎 Helper to check pond access using the parent doc
+    function canAccessPond(pondId) {
+      let pond = get(/databases/$(database)/documents/ponds/$(pondId));
+      return isSignedIn() && (
+        isAdmin() ||
+        // owner
+        (pond.data.userId == request.auth.uid) ||
+        // OPTIONAL: if you store collaborators on the pond doc, uncomment whichever you use:
+        (pond.data.members != null && request.auth.uid in pond.data.members) ||
+        (pond.data.collaborators != null && request.auth.uid in pond.data.collaborators)
       );
     }
 
+    // (Optional) minimal validation for alert writes
+    function isValidAlert(pondId) {
+      return
+        request.resource.data.pondId == pondId &&
+        request.resource.data.type in ['warning','error','success','info'] &&
+        request.resource.data.severity in ['low','medium','high'] &&
+        request.resource.data.active is bool;
+        // Note: we intentionally don't strict-validate timestamps to allow serverTimestamp()
+    }
+
+    // ---------- USERS ----------
+    match /users/{uid}/alertPrefs/{docId} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    match /users/{userId} {
+      allow create: if isOwner(userId);
+      allow read: if isOwner(userId) || isAdmin();
+      allow update: if ((isOwner(userId) && userDoesNotChangeAdminFields()) || isAdmin());
+    }
+
     // ---------- STUDENT ID RESERVATIONS ----------
-    // Uniqueness is enforced by client-side transaction:
-    //   1) create reservation at /studentIds/{studentId} if it doesn't exist
-    //   2) create auth user
-    //   3) write users/{uid} with studentId
-    //   4) finalize reservation with { uid }
-    //
-    // Rules:
-    // - Any signed-in user can READ to check availability
-    // - CREATE allowed only if doc doesn't exist (prevents duplicates)
-    // - UPDATE/DELETE allowed by admin, or by the same user who "owns" the reservation
-    //   (Once finalized, resource.data.uid == request.auth.uid)
-    //   NOTE: Initial reservation may not have a uid; we allow update in that case too.
     match /studentIds/{sid} {
       allow read: if isSignedIn();
-
-      // Only allow create when it doesn't already exist
       allow create: if isSignedIn()
                     && !exists(/databases/$(database)/documents/studentIds/$(sid));
-
-      // Allow updates/deletes by:
-      //  - admin
-      //  - the same uid that finalized the reservation
-      //  - OR while the reservation has no uid yet (to allow first-time finalize)
       allow update, delete: if isSignedIn() && (
         isAdmin() ||
         resource.data.uid == request.auth.uid ||
@@ -83,7 +81,6 @@ service cloud.firestore {
     }
 
     // ---------- GROWTH SETUPS ----------
-    // NOTE: These mirror your existing rules. Users can read/write only their own docs.
     match /growthSetups/{growthSetupId} {
       allow read, write: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
@@ -97,8 +94,18 @@ service cloud.firestore {
 
     // ---------- PONDS ----------
     match /ponds/{pondId} {
+      // Your existing rule (owner-only). Keep as-is unless you want members to read/write the pond doc itself.
       allow read, write: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+
+      // ✅ NEW: POND ALERTS SUBCOLLECTION
+      match /alerts/{alertId} {
+        // Read/write alerts if caller can access the pond (owner/admin/optional members)
+        allow read: if canAccessPond(pondId);
+        allow create, update: if canAccessPond(pondId) && isValidAlert(pondId);
+        // Optional: allow deletes (e.g., for admin tools)
+        allow delete: if canAccessPond(pondId) && isAdmin();
+      }
     }
   }
 }
