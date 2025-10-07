@@ -1,0 +1,104 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- Helpers ----------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Use Firebase custom claims for admins:
+    // e.g. set via Admin SDK: auth.setCustomUserClaims(uid, { role: 'admin' })
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.role == 'admin' ||
+        request.auth.token.admin == true
+      );
+    }
+
+    // Ensure regular users cannot change admin-only fields on /users docs
+    function userDoesNotChangeAdminFields() {
+      // If the client isn't admin, protected fields (status, role, approvals, studentId) must remain unchanged
+      return isAdmin() ||
+        (
+          (!('status' in request.resource.data) || request.resource.data.status == resource.data.status) &&
+          (!('role' in request.resource.data) || request.resource.data.role == resource.data.role) &&
+          (!('approvedAt' in request.resource.data) || request.resource.data.approvedAt == resource.data.approvedAt) &&
+          (!('approvedBy' in request.resource.data) || request.resource.data.approvedBy == resource.data.approvedBy) &&
+          (!('rejectedAt' in request.resource.data) || request.resource.data.rejectedAt == resource.data.rejectedAt) &&
+          (!('rejectedBy' in request.resource.data) || request.resource.data.rejectedBy == resource.data.rejectedBy) &&
+          (!('studentId' in request.resource.data) || request.resource.data.studentId == resource.data.studentId)
+        );
+    }
+
+    // ---------- USERS ----------
+    // Each user has a doc: /users/{userId}
+    // - Users can create their own doc at sign-up and read/update their own doc
+    // - Admins can read/update any user's doc (to approve/reject, set role, etc.)
+    match /users/{userId} {
+      allow create: if isOwner(userId);
+
+      allow read: if isOwner(userId) || isAdmin();
+
+      // Regular users can update their own non-admin fields; admins can update anything.
+      allow update: if (
+        (isOwner(userId) && userDoesNotChangeAdminFields()) ||
+        isAdmin()
+      );
+    }
+
+    // ---------- STUDENT ID RESERVATIONS ----------
+    // Uniqueness is enforced by client-side transaction:
+    //   1) create reservation at /studentIds/{studentId} if it doesn't exist
+    //   2) create auth user
+    //   3) write users/{uid} with studentId
+    //   4) finalize reservation with { uid }
+    //
+    // Rules:
+    // - Any signed-in user can READ to check availability
+    // - CREATE allowed only if doc doesn't exist (prevents duplicates)
+    // - UPDATE/DELETE allowed by admin, or by the same user who "owns" the reservation
+    //   (Once finalized, resource.data.uid == request.auth.uid)
+    //   NOTE: Initial reservation may not have a uid; we allow update in that case too.
+    match /studentIds/{sid} {
+      allow read: if isSignedIn();
+
+      // Only allow create when it doesn't already exist
+      allow create: if isSignedIn()
+                    && !exists(/databases/$(database)/documents/studentIds/$(sid));
+
+      // Allow updates/deletes by:
+      //  - admin
+      //  - the same uid that finalized the reservation
+      //  - OR while the reservation has no uid yet (to allow first-time finalize)
+      allow update, delete: if isSignedIn() && (
+        isAdmin() ||
+        resource.data.uid == request.auth.uid ||
+        !( 'uid' in resource.data )
+      );
+    }
+
+    // ---------- GROWTH SETUPS ----------
+    // NOTE: These mirror your existing rules. Users can read/write only their own docs.
+    match /growthSetups/{growthSetupId} {
+      allow read, write: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+    }
+
+    // ---------- GROWTH HISTORY ----------
+    match /growthHistory/{historyId} {
+      allow read, write: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+    }
+
+    // ---------- PONDS ----------
+    match /ponds/{pondId} {
+      allow read, write: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+    }
+  }
+}
