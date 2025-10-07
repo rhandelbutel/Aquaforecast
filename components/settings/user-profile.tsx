@@ -16,11 +16,11 @@ import { useToast } from "@/hooks/use-toast"
 
 export function UserProfile() {
   const { user } = useAuth()
-  const { userProfile, refreshProfile } = useUser()
+  const { userProfile } = useUser() // ❌ no more refreshProfile
   const { toast } = useToast()
 
   const [fullName, setFullName] = useState("")
-  const [phone, setPhone] = useState("") // always store digits-only here
+  const [phone, setPhone] = useState("") // store digits-only here
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState("")
   const [error, setError] = useState("")
@@ -31,20 +31,22 @@ export function UserProfile() {
   const originalPhone = (userProfile?.phone ?? "").replace(/\D/g, "")
   const originalFullName = userProfile?.fullName ?? ""
 
-  // --- helpers ---
+  // helpers
   const sanitizePhone = (v: string) => v.replace(/\D/g, "").slice(0, 11)
   const isPhoneEmpty = phone.length === 0
-  const isPhoneValid = isPhoneEmpty || /^\d{11}$/.test(phone) // allow empty (to clear), else exactly 11 digits
+  const isPhoneValid = isPhoneEmpty || /^[0-9]{11}$/.test(phone) // allow empty or exactly 11 digits
 
+  // when profile changes (via realtime), sync local fields
   useEffect(() => {
     if (!userProfile) return
     setFullName(originalFullName)
-    setPhone(originalPhone) // keep digits only
+    setPhone(originalPhone)
 
     const hasSavedPhone = originalPhone.length > 0
     setIsEditingPhone(!hasSavedPhone) // if saved, start locked; otherwise editable
   }, [userProfile, originalFullName, originalPhone])
 
+  // focus phone when entering edit mode
   useEffect(() => {
     if (isEditingPhone) {
       setTimeout(() => phoneRef.current?.focus(), 0)
@@ -75,7 +77,7 @@ export function UserProfile() {
     setSuccess("")
 
     try {
-      const cleanedPhone = phone // already digits-only & max 11
+      const cleanedPhone = phone // digits-only & max 11
       const cleanedFullName = fullName.trim()
 
       const updates: UpdatableProfile = {}
@@ -87,7 +89,7 @@ export function UserProfile() {
         updates.fullName = null
       }
 
-      // phone: set new (digits), or clear (null) if user erased an existing one
+      // phone: set new, or clear (null) if user erased an existing one
       if (cleanedPhone.length > 0) {
         updates.phone = cleanedPhone
       } else if ((userProfile?.phone ?? "") !== "") {
@@ -99,8 +101,7 @@ export function UserProfile() {
       setSuccess("Profile updated successfully!")
       toast({ title: "Saved", description: "Your profile changes have been saved." })
 
-      await refreshProfile()
-
+      // ✅ No manual refresh — realtime listener in user-context will update this view
       if (cleanedPhone.length > 0) setIsEditingPhone(false)
     } catch (err) {
       console.error("Error updating profile:", err)
@@ -110,7 +111,8 @@ export function UserProfile() {
     }
   }
 
-  const showPhoneEditButton = !!(userProfile?.phone && userProfile.phone.trim().length > 0) && !isEditingPhone
+  const showPhoneEditButton =
+    !!(userProfile?.phone && userProfile.phone.trim().length > 0) && !isEditingPhone
 
   return (
     <Card>
@@ -135,19 +137,18 @@ export function UserProfile() {
           )}
 
           {userProfile?.role === "user" && (
-              <div className="space-y-2">
-                <Label htmlFor="studentId">Student ID</Label>
-                <Input
-                  id="studentId"
-                  type="text"
-                  value={userProfile?.studentId ?? ""}
-                  disabled
-                  className="bg-gray-50"
-                />
-                <p className="text-xs text-gray-500">Student ID cannot be changed</p>
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="studentId">Student ID</Label>
+              <Input
+                id="studentId"
+                type="text"
+                value={userProfile?.studentId ?? ""}
+                disabled
+                className="bg-gray-50"
+              />
+              <p className="text-xs text-gray-500">Student ID cannot be changed</p>
+            </div>
           )}
-
 
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
@@ -175,7 +176,9 @@ export function UserProfile() {
                 id="phone"
                 type="tel"
                 inputMode="numeric"
-                pattern="\d{11}"
+                enterKeyHint="done"
+                // pattern matches full string; \d can be inconsistent across UAs
+                pattern="^[0-9]{11}$"
                 maxLength={11}
                 autoComplete="tel"
                 placeholder="Enter your 11-digit phone number"
