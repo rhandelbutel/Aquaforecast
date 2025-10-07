@@ -1,9 +1,12 @@
 "use client"
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Fish, Menu, Bell } from 'lucide-react'
 import { NotificationPanel } from '../notifications/notification-panel'
 import { usePonds } from '@/lib/pond-context'
+import { useAuth } from '@/lib/auth-context'
+import { subscribeSnoozes, type SnoozeMap } from '@/lib/alert-snooze-service'
+import { subscribeActiveAlerts, type StoredAlert } from '@/lib/alert-store-service'
 
 interface MobileHeaderProps {
   onMenuClick: () => void
@@ -12,21 +15,48 @@ interface MobileHeaderProps {
 export function MobileHeader({ onMenuClick }: MobileHeaderProps) {
   const [showNotifications, setShowNotifications] = useState(false)
   const { ponds } = usePonds()
-  
-  // Calculate notification count based on pond conditions
-  const getNotificationCount = () => {
-    if (ponds.length === 0) return 0
-    
-    let count = 0
-    ponds.forEach((pond) => {
-      const stockingDensity = pond.fishCount / pond.area
-      if (stockingDensity > 5) count++
-      if (pond.feedingFrequency < 2) count++
-    })
-    return Math.min(count, 9) // Cap at 9 for display
-  }
+  const { user } = useAuth()
+  const uid = user?.uid
+  const [dismissedUntil, setDismissedUntil] = useState<SnoozeMap>({})
+  const [pondAlertsMap, setPondAlertsMap] = useState<Record<string, StoredAlert[]>>({})
 
-  const notificationCount = getNotificationCount()
+  // Subscribe to user snoozes so badge respects dismissed items
+  useEffect(() => {
+    if (!uid) return
+    const unsub = subscribeSnoozes(uid, {}, (m) => setDismissedUntil(m || {}))
+    return unsub
+  }, [uid])
+
+  // Subscribe to active alerts across all ponds
+  useEffect(() => {
+    if (!ponds?.length) { setPondAlertsMap({}); return }
+    const unsubs: Array<() => void> = []
+    for (const p of ponds) {
+      const pondId = (p as any)?.adminPondId || p.id
+      if (!pondId) continue
+      const unsub = subscribeActiveAlerts(pondId, (list) => {
+        setPondAlertsMap(prev => ({ ...prev, [pondId]: list }))
+      })
+      unsubs.push(unsub)
+    }
+    return () => { for (const u of unsubs) try { u() } catch {} }
+  }, [ponds])
+
+  // Badge count = active alerts not snoozed
+  const notificationCount = useMemo(() => {
+    const now = Date.now()
+    // flatten and de-duplicate by id across ponds
+    const dedup: Record<string, StoredAlert> = {}
+    for (const list of Object.values(pondAlertsMap)) {
+      for (const a of (list || [])) dedup[a.id] = a
+    }
+    const all = Object.values(dedup)
+    const visible = all.filter(a => {
+      const until = dismissedUntil[a.id]
+      return !until || now >= until
+    })
+    return Math.min(visible.length, 9)
+  }, [pondAlertsMap, dismissedUntil])
 
   return (
     <>
