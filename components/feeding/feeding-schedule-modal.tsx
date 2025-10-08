@@ -1,4 +1,4 @@
-//components/feeding/feeding-schedule-modal.tsx
+// components/feeding/feeding-schedule-modal.tsx
 "use client"
 
 import type React from "react"
@@ -9,11 +9,15 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Calendar, Clock, Repeat, Save, X, UserCircle2 } from "lucide-react"
+import { Calendar, Clock, Repeat, Save, X, UserCircle2, Info } from "lucide-react"
 import { useAuth } from "@/lib/auth-context"
 import { usePonds, type UnifiedPond } from "@/lib/pond-context"
 import { useToast } from "@/hooks/use-toast"
-import { feedingScheduleService, type CreateFeedingScheduleData, type FeedingSchedule } from "@/lib/feeding-schedule-service"
+import {
+  feedingScheduleService,
+  type CreateFeedingScheduleData,
+  type FeedingSchedule,
+} from "@/lib/feeding-schedule-service"
 
 interface FeedingScheduleModalProps {
   isOpen: boolean
@@ -31,6 +35,18 @@ const DAYS_OF_WEEK = [
   { value: 6, label: "Saturday", short: "Sat" },
 ]
 
+// evenly spaced times between 07:00 and 19:00
+const generateTimes = (count: number): string[] => {
+  if (count <= 1) return ["07:00"]
+  const start = 7
+  const end = 19
+  const step = (end - start) / (count - 1)
+  return Array.from({ length: count }, (_, i) => {
+    const h = Math.round(start + i * step)
+    return `${String(h).padStart(2, "0")}:00`
+  })
+}
+
 export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleModalProps) {
   const { user } = useAuth()
   const { ponds } = usePonds()
@@ -43,10 +59,10 @@ export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleM
     [ponds, selectedPondId]
   )
   const sharedPondId = (selectedPond as any)?.adminPondId || selectedPond?.id
+  const pondFreq = Math.max(1, selectedPond?.feedingFrequency ?? 1) // lock to pond
 
-  // form state
-  const [timesPerDay, setTimesPerDay] = useState(2)
-  const [feedingTimes, setFeedingTimes] = useState<string[]>(["08:00", "18:00"])
+  // form state (timesPerDay is derived; not user-editable)
+  const [feedingTimes, setFeedingTimes] = useState<string[]>(generateTimes(pondFreq))
   const [repeatType, setRepeatType] = useState<"daily" | "weekly">("daily")
   const [selectedDays, setSelectedDays] = useState<number[]>([0, 1, 2, 3, 4, 5, 6])
   const [startDate, setStartDate] = useState("")
@@ -56,52 +72,104 @@ export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleM
   // loaded schedule (for “Current Schedule” view)
   const [current, setCurrent] = useState<FeedingSchedule | null>(null)
 
+  // guard so auto-reset runs once per (doc, freq)
+  const [autoResetKey, setAutoResetKey] = useState<string | null>(null)
+
   // Keep the pond selector in sync
   useEffect(() => {
     if (pond?.id) setSelectedPondId(pond.id)
   }, [pond?.id])
 
-  // Generate evenly spaced default times when timesPerDay changes (for ease)
+  // Update default times when pond frequency changes (no schedule yet)
   useEffect(() => {
-    const generateTimes = (count: number): string[] => {
-      if (count <= 1) return ["07:00"]
-      const start = 7
-      const end = 19
-      const step = (end - start) / (count - 1)
-      return new Array(count).fill(null).map((_, i) => {
-        const h = Math.round(start + i * step)
-        return `${String(h).padStart(2, "0")}:00`
-      })
-    }
-    setFeedingTimes((prev) => (prev.length === timesPerDay ? prev : generateTimes(timesPerDay)))
-  }, [timesPerDay])
+    setFeedingTimes((prev) => {
+      // if count already equals pond freq, keep whatever user typed
+      return prev.length === pondFreq ? prev : generateTimes(pondFreq)
+    })
+  }, [pondFreq])
 
   // Load & subscribe to the single schedule for the pond
   useEffect(() => {
     if (!isOpen || !sharedPondId) return
     const unsub = feedingScheduleService.subscribeByPond(sharedPondId, (sched) => {
       setCurrent(sched)
-      // Prefill form with existing schedule (edit mode)
+
       if (sched) {
-        setTimesPerDay(sched.timesPerDay)
-        setFeedingTimes(sched.feedingTimes)
+        // if schedule already matches pond frequency, use its times
+        if (sched.timesPerDay === pondFreq) {
+          setFeedingTimes(sched.feedingTimes)
+        } else {
+          // mismatch → set local preview to new evenly-spaced times (we'll also auto-upsert below)
+          setFeedingTimes(generateTimes(pondFreq))
+        }
+
         setRepeatType(sched.repeatType)
-        setSelectedDays(sched.repeatType === "weekly" ? (sched.selectedDays ?? []) : [0,1,2,3,4,5,6])
-        setStartDate(sched.startDate ? sched.startDate.toISOString().slice(0,10) : "")
-        setEndDate(sched.endDate ? sched.endDate.toISOString().slice(0,10) : "")
+        setSelectedDays(sched.repeatType === "weekly" ? sched.selectedDays ?? [] : [0, 1, 2, 3, 4, 5, 6])
+        setStartDate(sched.startDate ? sched.startDate.toISOString().slice(0, 10) : "")
+        setEndDate(sched.endDate ? sched.endDate.toISOString().slice(0, 10) : "")
       } else {
         // reset when no schedule yet
-        const today = new Date().toISOString().slice(0,10)
-        setTimesPerDay(2)
-        setFeedingTimes(["08:00","18:00"])
+        const today = new Date().toISOString().slice(0, 10)
+        setFeedingTimes(generateTimes(pondFreq))
         setRepeatType("daily")
-        setSelectedDays([0,1,2,3,4,5,6])
+        setSelectedDays([0, 1, 2, 3, 4, 5, 6])
         setStartDate(today)
         setEndDate("")
       }
     })
     return unsub
-  }, [isOpen, sharedPondId])
+  }, [isOpen, sharedPondId, pondFreq])
+
+  // If a schedule exists and pond frequency changed → auto-reset & save
+  useEffect(() => {
+    if (!current || !user) return
+    if (!selectedPond?.name || !sharedPondId) return
+    if (current.timesPerDay === pondFreq) return
+
+    const key = `${current.id}:${pondFreq}`
+    if (autoResetKey === key) return // already did this reset
+
+    const newTimes = generateTimes(pondFreq)
+    setAutoResetKey(key)
+
+    // Persist immediate reset
+    feedingScheduleService
+      .upsert(
+        user.uid,
+        {
+          pondId: sharedPondId,
+          pondName: selectedPond.name,
+          timesPerDay: pondFreq,
+          feedingTimes: newTimes,
+          repeatType,
+          selectedDays: repeatType === "weekly" ? selectedDays : undefined,
+          startDate: startDate ? new Date(startDate) : new Date(),
+          endDate: endDate ? new Date(endDate) : undefined,
+        },
+        { email: user.email ?? null, displayName: user.displayName ?? null }
+      )
+      .then(() => {
+        toast({
+          title: "Schedule reset",
+          description: `Pond feeding frequency is now ${pondFreq}×/day. The schedule was reset to match.`,
+        })
+      })
+      .catch((err) => {
+        console.error(err)
+      })
+  }, [
+    current,
+    pondFreq,
+    selectedPond?.name,
+    sharedPondId,
+    user,
+    repeatType,
+    selectedDays,
+    startDate,
+    endDate,
+    toast,
+    autoResetKey,
+  ])
 
   const handleTimeChange = (idx: number, time: string) => {
     setFeedingTimes((prev) => {
@@ -110,10 +178,9 @@ export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleM
       return next
     })
   }
+
   const toggleDay = (val: number) => {
-    setSelectedDays((prev) =>
-      prev.includes(val) ? prev.filter((d) => d !== val) : [...prev, val].sort()
-    )
+    setSelectedDays((prev) => (prev.includes(val) ? prev.filter((d) => d !== val) : [...prev, val].sort()))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -128,8 +195,8 @@ export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleM
       const payload: CreateFeedingScheduleData = {
         pondId: sharedPondId,
         pondName: selectedPond.name,
-        timesPerDay,
-        feedingTimes,
+        timesPerDay: pondFreq,           // ← locked to pond
+        feedingTimes,                    // length must equal pondFreq
         repeatType,
         selectedDays: repeatType === "weekly" ? selectedDays : undefined,
         startDate: new Date(startDate),
@@ -182,21 +249,17 @@ export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleM
             </Select>
           </div>
 
-          {/* Times per day */}
-          <div className="space-y-2">
+          {/* Times per day (locked to pond) */}
+          <div className="space-y-1">
             <Label>Feeding Times Per Day</Label>
-            <Select value={String(timesPerDay)} onValueChange={(v) => setTimesPerDay(parseInt(v))}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {[1,2,3,4,5,6].map((n) => (
-                  <SelectItem key={n} value={String(n)}>
-                    {n} time{n>1?"s":""} per day
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="rounded-md border bg-gray-50 px-3 py-2 text-sm">
+              {pondFreq} time{pondFreq > 1 ? "s" : ""} per day{" "}
+              <span className="text-gray-500">(from pond settings)</span>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-gray-600 mt-1">
+              <Info className="h-3.5 w-3.5" />
+              Changing the pond’s feeding frequency will automatically reset this schedule to match.
+            </div>
           </div>
 
           {/* Feeding times */}
@@ -206,7 +269,7 @@ export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleM
               Feeding Times
             </Label>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {Array.from({ length: timesPerDay }).map((_, i) => (
+              {Array.from({ length: pondFreq }).map((_, i) => (
                 <div key={i} className="space-y-1">
                   <Label className="text-xs text-gray-500">Time {i + 1}</Label>
                   <Input
@@ -244,10 +307,7 @@ export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleM
               <div className="flex flex-wrap gap-3">
                 {DAYS_OF_WEEK.map((d) => (
                   <label key={d.value} className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox
-                      checked={selectedDays.includes(d.value)}
-                      onCheckedChange={() => toggleDay(d.value)}
-                    />
+                    <Checkbox checked={selectedDays.includes(d.value)} onCheckedChange={() => toggleDay(d.value)} />
                     <span className="text-sm">{d.short}</span>
                   </label>
                 ))}
@@ -267,14 +327,20 @@ export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleM
             </div>
           </div>
 
-          {/* Current schedule (replaces summary) */}
+          {/* Current schedule */}
           <div className="rounded-lg border p-4 bg-gray-50">
             <div className="text-sm font-medium mb-2">Current Schedule</div>
             {current ? (
               <div className="text-sm grid gap-1">
-                <div><b>Pond:</b> {current.pondName}</div>
-                <div><b>Times/Day:</b> {current.timesPerDay}</div>
-                <div><b>Times:</b> {current.feedingTimes.join(", ")}</div>
+                <div>
+                  <b>Pond:</b> {current.pondName}
+                </div>
+                <div>
+                  <b>Times/Day:</b> {current.timesPerDay}
+                </div>
+                <div>
+                  <b>Times:</b> {current.feedingTimes.join(", ")}
+                </div>
                 <div>
                   <b>Repeat:</b>{" "}
                   {current.repeatType === "daily"
@@ -284,14 +350,29 @@ export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleM
                         .filter(Boolean)
                         .join(", ")})`}
                 </div>
-                <div><b>Start:</b> {current.startDate.toISOString().slice(0,10)}</div>
-                {current.endDate && <div><b>End:</b> {current.endDate.toISOString().slice(0,10)}</div>}
+                <div>
+                  <b>Start:</b> {current.startDate.toISOString().slice(0, 10)}
+                </div>
+                {current.endDate && (
+                  <div>
+                    <b>End:</b> {current.endDate.toISOString().slice(0, 10)}
+                  </div>
+                )}
                 <div className="mt-2 flex items-center gap-2 text-gray-700">
                   <UserCircle2 className="h-4 w-4" />
                   <span className="text-xs">
                     Set by <b>{current.createdBy.displayName || current.createdBy.email || current.createdBy.userId}</b>
-                    {current.lastUpdatedBy &&
-                      <> • Last edit by <b>{current.lastUpdatedBy.displayName || current.lastUpdatedBy.email || current.lastUpdatedBy.userId}</b></>}
+                    {current.lastUpdatedBy && (
+                      <>
+                        {" "}
+                        • Last edit by{" "}
+                        <b>
+                          {current.lastUpdatedBy.displayName ||
+                            current.lastUpdatedBy.email ||
+                            current.lastUpdatedBy.userId}
+                        </b>
+                      </>
+                    )}
                   </span>
                 </div>
               </div>
