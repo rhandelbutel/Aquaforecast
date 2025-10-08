@@ -23,9 +23,9 @@ import {
 import { GrowthService, type GrowthHistory } from "@/lib/growth-service"
 
 /* --------------------------------------------
-   Stage-based Nile Tilapia weekly growth model
+   Stage-based Nile Tilapia growth model
    -------------------------------------------- */
-type GrowthStage = { from: number; to: number | null; rate: number }
+type GrowthStage = { from: number; to: number | null; rate: number } // rate = g/week
 
 // Typical weekly gains by stage (g/week)
 const TILAPIA_STAGES: GrowthStage[] = [
@@ -36,7 +36,10 @@ const TILAPIA_STAGES: GrowthStage[] = [
   { from: 600, to: null, rate: 37.5 },
 ]
 
-function stageRateFor(weightG: number, stages = TILAPIA_STAGES): number {
+// ---- Cadence: every 15 days ----
+const CADENCE_DAYS = 15
+
+function stageWeeklyRate(weightG: number, stages = TILAPIA_STAGES): number {
   for (const s of stages) {
     if (s.to === null) {
       if (weightG >= s.from) return s.rate
@@ -47,30 +50,36 @@ function stageRateFor(weightG: number, stages = TILAPIA_STAGES): number {
   return stages[stages.length - 1].rate
 }
 
-/** Build predicted series that:
- *  1) Creates a baseline forecast ignoring actuals;
- *  2) If there is a latest actual at week k, re-forecasts ONLY from week k+1 onward
+function stageRatePerCadence(weightG: number): number {
+  // convert weekly rate to per-15-days
+  return stageWeeklyRate(weightG) * (CADENCE_DAYS / 7)
+}
+
+/**
+ * Build predicted series in 15-day steps that:
+ *  1) creates a baseline forecast ignoring actuals;
+ *  2) if there is a latest actual at period k, re-forecasts ONLY from k+1 onward
  *     starting from that actual value; earlier predicted points remain as originally forecast.
  */
 function buildPredictedSeries(
   actual: Array<number | null>,
-  seed: number,                 // starting ABW for Week 1 if no actual[0]
+  seed: number,                 // starting ABW for Period 1 if no actual[0]
   target: number | null,
-  extraWeeksAhead = 12
+  extraPeriodsAhead = 8
 ) {
-  const baseWeeks = Math.max(1, actual.length)
-  const weeks = baseWeeks + extraWeeksAhead
-  const pred: number[] = new Array(weeks)
+  const basePeriods = Math.max(1, actual.length)
+  const periods = basePeriods + extraPeriodsAhead
+  const pred: number[] = new Array(periods)
   const clamp = (v: number) => (target ? Math.min(target, v) : v)
 
-  // 1) Baseline forecast that ignores all actuals
+  // 1) Baseline forecast (15d increments) that ignores all actuals
   pred[0] = clamp(Math.max(1, seed))
-  for (let i = 1; i < weeks; i++) {
+  for (let i = 1; i < periods; i++) {
     const prev = pred[i - 1]
-    pred[i] = clamp(prev + stageRateFor(prev))
+    pred[i] = clamp(prev + stageRatePerCadence(prev))
   }
 
-  // 2) Find latest actual and re-forecast ONLY from the next week onward
+  // 2) Find latest actual and re-forecast ONLY from the next 15-day period onward
   let latestIdx = -1
   for (let i = actual.length - 1; i >= 0; i--) {
     if (typeof actual[i] === "number") {
@@ -80,12 +89,11 @@ function buildPredictedSeries(
   }
   if (latestIdx >= 0) {
     let w = actual[latestIdx] as number
-    for (let i = latestIdx + 1; i < weeks; i++) {
-      w = clamp(w + stageRateFor(w))
+    for (let i = latestIdx + 1; i < periods; i++) {
+      w = clamp(w + stageRatePerCadence(w))
       pred[i] = w
     }
-    // NOTE: we intentionally do NOT overwrite pred[latestIdx],
-    // so earlier predicted points stay as originally forecast.
+    // NOTE: we intentionally do NOT overwrite pred[latestIdx]
   }
 
   return pred
@@ -115,7 +123,7 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
   const [currentABW, setCurrentABW] = useState<number | null>(null)
   const [targetWeight, setTargetWeight] = useState<number | null>(null)
 
-  // history (actual) — chronological: Week 1 … Week N
+  // history (actual) — chronological 15-day periods: P1 … PN
   const [history, setHistory] = useState<GrowthHistory[]>([])
 
   useEffect(() => {
@@ -159,39 +167,37 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
   const actualSeries = useMemo(
     () =>
       history.map((h, idx) => ({
-        label: `Week ${idx + 1}`,
+        label: `Fortnight ${idx + 1}`,
         actual: typeof h.abw === "number" ? h.abw : null,
       })),
     [history]
   )
 
-  // Seed for Week 1 if no actual[0] exists
-  const seedForWeek1 =
+  // Seed for P1 if no actual[0] exists
+  const seedForP1 =
     (history.length && typeof history[0].abw === "number" ? history[0].abw : null) ??
     currentABW ??
     5
 
-  // Predicted series: baseline + rebase after latest actual
+  // Predicted series: baseline + rebase after latest actual (15-day cadence)
   const predictedSeries = useMemo(() => {
     const actualOnly = actualSeries.map((a) => a.actual)
-    return buildPredictedSeries(actualOnly, seedForWeek1, targetWeight ?? null, 12)
-  }, [actualSeries, seedForWeek1, targetWeight])
+    return buildPredictedSeries(actualOnly, seedForP1, targetWeight ?? null, 8)
+  }, [actualSeries, seedForP1, targetWeight])
 
   // Merge for Recharts
   const chartData = useMemo(() => {
-    const maxWeeks = Math.max(actualSeries.length, predictedSeries.length)
+    const maxPts = Math.max(actualSeries.length, predictedSeries.length)
     const rows: { label: string; actual: number | null; predicted: number | null }[] = []
-    for (let i = 0; i < maxWeeks; i++) {
+    for (let i = 0; i < maxPts; i++) {
       rows.push({
-        label: `Week ${i + 1}`,
+        label: `Fortnight ${i + 1}`,
         actual: i < actualSeries.length ? actualSeries[i].actual : null,
         predicted: i < predictedSeries.length ? predictedSeries[i] : null,
       })
     }
     return rows
   }, [actualSeries, predictedSeries])
-
-  const feedEfficiencyData = generateFeedEfficiencyData(pond)
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -209,7 +215,7 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
           </p>
         </CardHeader>
         <CardContent>
-          {seedForWeek1 == null ? (
+          {seedForP1 == null ? (
             <div className="text-sm text-gray-500">Add an ABW to see predictions.</div>
           ) : (
             <ResponsiveContainer width="100%" height={320}>
@@ -233,8 +239,7 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
                   dot={{ r: 3 }}
                   connectNulls={false}
                 />
-                {/* Predicted dotted line — stays independent before the latest actual,
-                    and only re-bases from the week AFTER the latest actual. */}
+                {/* Predicted dotted line */}
                 <Line
                   type="monotone"
                   dataKey="predicted"

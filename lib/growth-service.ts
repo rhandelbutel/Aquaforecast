@@ -38,6 +38,10 @@ export class GrowthService {
   private static readonly COLLECTION_NAME = "growthsetup"
   private static readonly HISTORY_COLLECTION_NAME = "growthhistory"
 
+  // ---- Cadence settings (15-day ABW) ----
+  private static readonly ABW_CADENCE_DAYS = 15
+  private static readonly DAY_MS = 86_400_000
+
   static async saveGrowthSetup(
     pondId: string,
     userId: string,
@@ -165,20 +169,21 @@ export class GrowthService {
     return isNaN(d.getTime()) ? null : d
   }
 
+  // ---- Cadence-aware ABW timing (15 days) ----
   static canUpdateABW(lastABWUpdate: Timestamp | Date | unknown): boolean {
     const now = new Date()
     const last = this.toSafeDate(lastABWUpdate)
     if (!last) return true
-    const days = Math.floor((now.getTime() - last.getTime()) / 86_400_000)
-    return days >= 7
+    const days = Math.floor((now.getTime() - last.getTime()) / this.DAY_MS)
+    return days >= this.ABW_CADENCE_DAYS
   }
 
   static getDaysUntilNextUpdate(lastABWUpdate: Timestamp | Date | unknown): number {
     const now = new Date()
     const last = this.toSafeDate(lastABWUpdate)
     if (!last) return 0
-    const days = Math.floor((now.getTime() - last.getTime()) / 86_400_000)
-    return Math.max(0, 7 - days)
+    const days = Math.floor((now.getTime() - last.getTime()) / this.DAY_MS)
+    return Math.max(0, this.ABW_CADENCE_DAYS - days)
   }
 
   private static async addGrowthHistory(

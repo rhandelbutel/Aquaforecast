@@ -316,7 +316,7 @@ export function GrowthSetupModal({
           {/* Weekly Preview & History — now a dropdown (collapsible) */}
           <Collapsible open={previewOpen} onOpenChange={setPreviewOpen} className="rounded-lg border">
             <div className="flex items-center justify-between px-3 py-2">
-              <p className="text-sm font-medium">Weekly Growth Preview</p>
+              <p className="text-sm font-medium">Growth Preview</p>
               <CollapsibleTrigger asChild>
                 <Button variant="ghost" size="sm" className="h-8 w-8 p-0" aria-label="Toggle preview">
                   <ChevronDown
@@ -337,7 +337,7 @@ export function GrowthSetupModal({
                   <p className="font-semibold">{lastABW ?? 0}</p>
                 </div>
                 <div className="rounded bg-gray-50 p-2">
-                  <p className="text-xs text-gray-500">Weekly Growth (g)</p>
+                  <p className="text-xs text-gray-500">Fortnight Growth (g)</p>
                   <p className="font-semibold">{weeklyGrowth}</p>
                 </div>
               </div>
@@ -357,7 +357,7 @@ export function GrowthSetupModal({
                     )
                   })}
                   {history.length === 0 && (
-                    <li className="text-xs text-gray-500">No history yet. Weekly growth will show 0.</li>
+                    <li className="text-xs text-gray-500">No history yet. Growth will show 0.</li>
                   )}
                 </ul>
               </div>
