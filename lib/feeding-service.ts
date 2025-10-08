@@ -1,4 +1,3 @@
-// lib/feeding-service.ts
 import {
   collection,
   addDoc,
@@ -22,6 +21,10 @@ export interface FeedingLog {
   fedAt: Date
   feedGiven?: number
   feedUnit?: "g" | "kg"
+  // NEW (optional) — for auto-logged entries:
+  autoLogged?: boolean
+  reason?: "missed_schedule" | "manual" | "other"
+  scheduledFor?: Date
   createdAt: Date
 }
 
@@ -59,6 +62,9 @@ function toFeedingLog(id: string, data: DocumentData): FeedingLog {
     fedAt: toSafeDate(data.fedAt),
     feedGiven: data.feedGiven,
     feedUnit: data.feedUnit,
+    autoLogged: !!data.autoLogged,
+    reason: data.reason,
+    scheduledFor: data.scheduledFor ? toSafeDate(data.scheduledFor) : undefined,
     createdAt: toSafeDate(data.createdAt),
   }
 }
@@ -67,7 +73,6 @@ function toFeedingLog(id: string, data: DocumentData): FeedingLog {
 export async function addFeedingLog(
   log: Omit<FeedingLog, "id" | "createdAt">
 ) {
-  // Remove undefined keys before writing
   const payload = stripUndefined({
     ...log,
     createdAt: serverTimestamp(),
