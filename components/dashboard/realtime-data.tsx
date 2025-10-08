@@ -3,20 +3,19 @@ import { Thermometer, Droplets, Zap, Eye } from "lucide-react";
 import type { UnifiedPond } from "@/lib/pond-context";
 import { useAquaSensors } from "@/hooks/useAquaSensors";
 
-// ==================== SET THIS TO YOUR ESP32 IP ====================
-const ESP32_BASE = "http://192.168.1.157"; // <-- change to the IP shown on LCD
-// If you prefer mDNS and it works on your machine, you can use:
-// const ESP32_BASE = "http://aquamon.local";
-// Or if you created the Next.js proxy, use:
-// const ESP32_BASE = "/api";
-// ==================================================================
+// ==================== SENSOR ENDPOINT CONFIG ====================
+// Prefer env; falls back to mDNS host. Example:
+// NEXT_PUBLIC_SENSORS_BASE=http://192.168.1.157
+const ESP32_BASE =
+  (process.env.NEXT_PUBLIC_SENSORS_BASE as string | undefined) || "http://aquamon.local";
+// ===============================================================
 
 // Ranges you’ve been using in your app (tweak as needed)
 const RANGES = {
-  ph:   { min: 6.5, max: 8.5, label: "6.5–8.5" },
-  temp: { min: 22,  max: 28,  label: "22–28°C" },
-  do:   { min: 6,   max: 10,  label: "6–10 mg/L" },
-  tds:  { min: 300, max: 500, label: "300–500 ppm" },
+  ph:   { min: 6.5, max: 9.0, label: "6.5–9.0" },
+  temp: { min: 28,  max: 31,  label: "22–28°C" },
+  do:   { min: 3,   max: 5,  label: "3–5 mg/L" },
+  tds:  { min: 100, max: 400, label: "300–500 ppm" },
 };
 
 type Status = "optimal" | "warning" | "danger";

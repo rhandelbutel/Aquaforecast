@@ -24,7 +24,8 @@ export function DashboardWithPonds() {
   const [selectedPond, setSelectedPond] = useState<ReturnType<typeof usePonds>["ponds"][number] | null>(
     ponds[0] || null,
   )
-  const ESP32_BASE = "http://192.168.1.157"; // IP from LCD
+  // Use env-configured base URL if provided; default to mDNS host
+  const ESP32_BASE = (process.env.NEXT_PUBLIC_SENSORS_BASE as string | undefined) || "http://aquamon.local";
   const { data, error, isOnline } = useAquaSensors({
     baseUrl: ESP32_BASE,
     intervalMs: 1000,

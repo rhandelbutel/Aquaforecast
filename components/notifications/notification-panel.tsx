@@ -121,12 +121,14 @@ export function NotificationPanel({ onClose, limit = 6 }: NotificationPanelProps
     return () => { for (const u of unsubs) try { u() } catch {} }
   }, [ponds])
 
-  // Apply snoozes → only show non-snoozed alerts
+  // Apply snoozes → only show non-snoozed alerts, exclude non-actionable "success" items
   const visible = useMemo(() => {
     const now = Date.now()
     const base = remoteAlerts.filter(a => {
       const until = dismissedUntil[a.id]
-      return !until || now >= until
+      const notSnoozed = !until || now >= until
+      const isActionable = (a as any)?.type !== "success"
+      return notSnoozed && isActionable
     })
     // keep most recent first and cap to limit
     return base.slice(0, limit)
