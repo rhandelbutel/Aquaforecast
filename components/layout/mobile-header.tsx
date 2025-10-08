@@ -42,7 +42,7 @@ export function MobileHeader({ onMenuClick }: MobileHeaderProps) {
     return () => { for (const u of unsubs) try { u() } catch {} }
   }, [ponds])
 
-  // Badge count = active alerts not snoozed
+  // Badge count = active alerts not snoozed (exclude purely "success"/normal items)
   const notificationCount = useMemo(() => {
     const now = Date.now()
     // flatten and de-duplicate by id across ponds
@@ -53,7 +53,9 @@ export function MobileHeader({ onMenuClick }: MobileHeaderProps) {
     const all = Object.values(dedup)
     const visible = all.filter(a => {
       const until = dismissedUntil[a.id]
-      return !until || now >= until
+      const notSnoozed = !until || now >= until
+      const isActionable = (a as any)?.type !== "success"
+      return notSnoozed && isActionable
     })
     return Math.min(visible.length, 9)
   }, [pondAlertsMap, dismissedUntil])

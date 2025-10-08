@@ -200,12 +200,14 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
     return unsub
   }, [pondId])
 
-  // combine remote active alerts + user snoozes
+  // combine remote active alerts + user snoozes (exclude non-actionable "success" items)
   const visibleAlerts = useMemo(() => {
     const now = Date.now()
     return remoteAlerts.filter(a => {
       const until = dismissedUntil[a.id]
-      return !until || now >= until
+      const notSnoozed = !until || now >= until
+      const isActionable = (a as any)?.type !== "success"
+      return notSnoozed && isActionable
     })
   }, [remoteAlerts, dismissedUntil])
 
