@@ -2,6 +2,7 @@ import { PondData } from '@/lib/pond-service'
 import { ParameterCards } from './parameter-cards'
 import { WaterQualityCharts } from './water-quality-charts'
 import { ExportData } from './export-data'
+import { Ingestor } from "./ingestor"
 
 interface WaterQualityWithPondsProps {
   ponds: PondData[]
@@ -18,8 +19,12 @@ export function WaterQualityWithPonds({ ponds }: WaterQualityWithPondsProps) {
         <ExportData />
       </div>
 
+      
       {ponds.map((pond) => (
         <div key={pond.id} className="space-y-4">
+          {/* Hidden background poster that feeds Firestore */}
+          <Ingestor pondId={pond.id!} />
+
           <h2 className="text-xl font-semibold text-gray-900">
             {pond.name} - {pond.fishSpecies}
           </h2>
