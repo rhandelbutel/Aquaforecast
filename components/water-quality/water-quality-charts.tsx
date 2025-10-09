@@ -15,6 +15,12 @@ export function WaterQualityCharts({ pondId }: { pondId: string }) {
 
  type SeriesPoint = { time: string; value: number | null };
 
+const formatTwoDecimals = (v: unknown) => {
+  if (typeof v === "number" && isFinite(v)) return v.toFixed(2);
+  const n = Number(v as any);
+  return isFinite(n) ? n.toFixed(2) : String(v ?? "");
+};
+
 const Chart = ({
   title, data, yDomain,
 }: { title: string; data: SeriesPoint[]; yDomain?: any }) => (
@@ -25,8 +31,8 @@ const Chart = ({
         <LineChart data={data}>
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="time" />
-          <YAxis domain={yDomain ?? ['auto', 'auto']} />
-          <Tooltip />
+          <YAxis domain={yDomain ?? ['auto', 'auto']} tickFormatter={formatTwoDecimals as any} />
+          <Tooltip formatter={(value) => formatTwoDecimals(value)} />
           <Line
             type="monotone"
             dataKey="value"

@@ -112,9 +112,8 @@ export function ParameterCards({ pondId }: ParameterCardsProps) {
             <CardContent>
               <div className="flex items-center justify-between">
                 <div className="text-2xl font-bold">{param.current}</div>
-                <TrendIcon className={`h-4 w-4 ${getTrendColor(param.trend as any, param.status)}`} />
+                {/* <TrendIcon className={`h-4 w-4 ${getTrendColor(param.trend as any, param.status)}`} /> */}
               </div>
-              <p className="text-xs text-gray-500 mt-1">Previous: {param.previous}</p>
               <p className="text-xs text-gray-500 mt-1">Range: {param.range}</p>
             </CardContent>
           </Card>
