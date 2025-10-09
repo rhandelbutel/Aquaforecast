@@ -12,16 +12,13 @@ interface ParameterCardsProps {
   pondId: string;
 }
 
-const ONLINE_GRACE_MS = 20_000; // ← consider offline if no update for 20s
+const ONLINE_GRACE_MS = 20_000; // consider offline if no update for 20s
 
 const getTrendIcon = (trend: "up" | "down" | "stable") => {
   switch (trend) {
-    case "up":
-      return TrendingUp;
-    case "down":
-      return TrendingDown;
-    default:
-      return Minus;
+    case "up": return TrendingUp;
+    case "down": return TrendingDown;
+    default: return Minus;
   }
 };
 
@@ -55,14 +52,10 @@ const badgeClass = (
   status: "optimal" | "warning" | "danger" | "offline"
 ) => {
   switch (status) {
-    case "optimal":
-      return "bg-green-100 text-green-800 border-green-200";
-    case "warning":
-      return "bg-yellow-100 text-yellow-800 border-yellow-200";
-    case "danger":
-      return "bg-red-100 text-red-800 border-red-200";
-    case "offline":
-      return "bg-gray-100 text-gray-700 border-gray-200";
+    case "optimal": return "bg-green-100 text-green-800 border-green-200";
+    case "warning": return "bg-yellow-100 text-yellow-800 border-yellow-200";
+    case "danger":  return "bg-red-100 text-red-800 border-red-200";
+    case "offline": return "bg-gray-100 text-gray-700 border-gray-200";
   }
 };
 
@@ -70,35 +63,39 @@ export function ParameterCards({ pondId }: ParameterCardsProps) {
   const { preferences } = useUser();
   const prefs =
     preferences || {
-      tempMin: 28,
-      tempMax: 31,
-      phMin: 6.5,
-      phMax: 9.0,
-      doMin: 3,
-      doMax: 5,
-      tdsMin: 100,
-      tdsMax: 400,
+      tempMin: 28, tempMax: 31,
+      phMin: 6.5, phMax: 9.0,
+      doMin: 3,   doMax: 5,
+      tdsMin: 100, tdsMax: 400,
     };
 
   // 1) live current from ESP32 (LAN)
-  const [current, setCurrent] = useState<{
-    ph: number;
-    temp: number;
-    do: number;
-    tds: number;
-  } | null>(null);
+  const [current, setCurrent] = useState<{ ph: number; temp: number; do: number; tds: number } | null>(null);
 
   // track last successful fetch time
   const [lastSeen, setLastSeen] = useState<number | null>(null);
 
+  // heartbeat so "online" can expire in real time
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => (t + 1) % 1_000_000), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // precise one-shot timer that fires exactly when grace window ends
+  useEffect(() => {
+    if (lastSeen == null) return;
+    const remain = Math.max(0, ONLINE_GRACE_MS - (Date.now() - lastSeen));
+    const id = setTimeout(() => setTick(t => t + 1), remain + 5);
+    return () => clearTimeout(id);
+  }, [lastSeen]);
+
   useEffect(() => {
     let mounted = true;
 
-    async function tick() {
+    async function tickFetch() {
       try {
-        const res = await fetch("http://aquamon.local/sensors", {
-          cache: "no-store",
-        });
+        const res = await fetch("http://aquamon.local/sensors", { cache: "no-store" });
         const j = await res.json();
         if (!mounted) return;
         setCurrent({
@@ -107,31 +104,23 @@ export function ParameterCards({ pondId }: ParameterCardsProps) {
           do: Number(j.do),
           tds: Number(j.tds),
         });
-        // update lastSeen on any successful fetch
-        setLastSeen(Date.now());
+        setLastSeen(Date.now()); // mark successful arrival
       } catch {
-        // swallow; lastSeen not updated -> will drift toward offline
+        // no update → lastSeen unchanged so it will drift to offline
       }
     }
 
-    tick();
-    const id = setInterval(tick, 10_000);
-    return () => {
-      mounted = false;
-      clearInterval(id);
-    };
+    tickFetch();
+    const id = setInterval(tickFetch, 10_000);
+    return () => { mounted = false; clearInterval(id); };
   }, []);
 
-  const online =
-    lastSeen != null && Date.now() - lastSeen <= ONLINE_GRACE_MS;
+  const online = lastSeen != null && Date.now() - lastSeen <= ONLINE_GRACE_MS;
 
   // 2) today/yesterday averages
   const { today, yesterday } = useDailyMetrics(pondId);
 
-  const trendOf = (
-    todayVal: number | null,
-    yVal: number | null
-  ): "up" | "down" | "stable" => {
+  const trendOf = (todayVal: number | null, yVal: number | null): "up" | "down" | "stable" => {
     if (todayVal == null || yVal == null) return "stable";
     const diff = todayVal - yVal;
     if (Math.abs(diff) < 1e-3) return "stable";
@@ -141,18 +130,15 @@ export function ParameterCards({ pondId }: ParameterCardsProps) {
   const cards = useMemo(() => {
     const cur = current ?? { ph: NaN, temp: NaN, do: NaN, tds: NaN };
 
-    // If offline, force status to "offline" regardless of values
     const computeStatus = (
-      v: number,
-      min: number,
-      max: number
+      v: number, min: number, max: number
     ): "optimal" | "warning" | "danger" | "offline" =>
       online ? statusOf(v, min, max) : "offline";
 
-    const phStatus = computeStatus(cur.ph, prefs.phMin, prefs.phMax);
-    const tStatus = computeStatus(cur.temp, prefs.tempMin, prefs.tempMax);
-    const doStatus = computeStatus(cur.do, prefs.doMin, prefs.doMax);
-    const tdsStatus = computeStatus(cur.tds, prefs.tdsMin, prefs.tdsMax);
+    const phStatus  = computeStatus(cur.ph,   prefs.phMin,   prefs.phMax);
+    const tStatus   = computeStatus(cur.temp, prefs.tempMin, prefs.tempMax);
+    const doStatus  = computeStatus(cur.do,   prefs.doMin,   prefs.doMax);
+    const tdsStatus = computeStatus(cur.tds,  prefs.tdsMin,  prefs.tdsMax);
 
     return [
       {
@@ -168,8 +154,7 @@ export function ParameterCards({ pondId }: ParameterCardsProps) {
         key: "temp",
         name: "Temperature",
         current: isFinite(cur.temp) ? `${cur.temp.toFixed(2)}°C` : "—",
-        previous:
-          yesterday.temp != null ? `${yesterday.temp.toFixed(2)}°C` : "—",
+        previous: yesterday.temp != null ? `${yesterday.temp.toFixed(2)}°C` : "—",
         trend: trendOf(today.temp, yesterday.temp),
         status: tStatus,
         range: `${prefs.tempMin}-${prefs.tempMax}°C`,
@@ -178,8 +163,7 @@ export function ParameterCards({ pondId }: ParameterCardsProps) {
         key: "do",
         name: "Dissolved Oxygen",
         current: isFinite(cur.do) ? `${cur.do.toFixed(2)} mg/L` : "—",
-        previous:
-          yesterday.do != null ? `${yesterday.do.toFixed(2)} mg/L` : "—",
+        previous: yesterday.do != null ? `${yesterday.do.toFixed(2)} mg/L` : "—",
         trend: trendOf(today.do, yesterday.do),
         status: doStatus,
         range: `${prefs.doMin}-${prefs.doMax} mg/L`,
@@ -188,14 +172,14 @@ export function ParameterCards({ pondId }: ParameterCardsProps) {
         key: "tds",
         name: "TDS",
         current: isFinite(cur.tds) ? `${cur.tds.toFixed(0)} ppm` : "—",
-        previous:
-        yesterday.tds != null ? `${yesterday.tds.toFixed(0)} ppm` : "—",
+        previous: yesterday.tds != null ? `${yesterday.tds.toFixed(0)} ppm` : "—",
         trend: trendOf(today.tds, yesterday.tds),
         status: tdsStatus,
         range: `${prefs.tdsMin}-${prefs.tdsMax} ppm`,
       },
     ] as const;
-  }, [current, today, yesterday, prefs, online]);
+  // include `tick` so the memo recalculates as time passes
+  }, [current, today, yesterday, prefs, online, tick]);
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
