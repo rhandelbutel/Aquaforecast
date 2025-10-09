@@ -1,3 +1,4 @@
+// lib/mortality-service.ts
 import {
   collection,
   addDoc,

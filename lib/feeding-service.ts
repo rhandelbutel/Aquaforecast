@@ -1,3 +1,4 @@
+// lib/feeding-service.ts
 import {
   collection,
   addDoc,
@@ -21,7 +22,7 @@ export interface FeedingLog {
   fedAt: Date
   feedGiven?: number
   feedUnit?: "g" | "kg"
-  // NEW (optional) — for auto-logged entries:
+  // NEW — identify auto-logs
   autoLogged?: boolean
   reason?: "missed_schedule" | "manual" | "other"
   scheduledFor?: Date
@@ -73,6 +74,15 @@ function toFeedingLog(id: string, data: DocumentData): FeedingLog {
 export async function addFeedingLog(
   log: Omit<FeedingLog, "id" | "createdAt">
 ) {
+  // Validation: require a positive feedGiven for manual logs
+  const isAuto = !!log.autoLogged
+  const val = log.feedGiven
+  if (!isAuto) {
+    if (val == null || !Number.isFinite(val) || val <= 0) {
+      throw new Error("feedGiven must be a positive number for manual logs.")
+    }
+  }
+
   const payload = stripUndefined({
     ...log,
     createdAt: serverTimestamp(),

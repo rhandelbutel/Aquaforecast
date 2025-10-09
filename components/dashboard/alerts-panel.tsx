@@ -162,7 +162,7 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
     }
     if (lastABWUpdate) {
       const days = Math.floor((Date.now() - lastABWUpdate.getTime()) / (1000 * 60 * 60 * 24))
-      if (days >= 7) {
+      if (days >= 15) {
         list.push({ id: "abw-due", type: "info", title: "ABW measurement due",
           message: `It’s been ${days} days since the last ABW update.`, when: now, severity: "low" })
       }
