@@ -1,4 +1,3 @@
-// lib/feeding-schedule-service.ts
 import {
   collection,
   doc,
@@ -79,9 +78,7 @@ function validate(data: CreateFeedingScheduleData) {
 }
 
 export const feedingScheduleService = {
-  /**
-   * Returns the single schedule for a pond (doc id == pondId), or null if not set.
-   */
+  /** Returns the single schedule for a pond (doc id == pondId), or null if not set. */
   async getByPondId(pondId: string): Promise<FeedingSchedule | null> {
     const ref = doc(db, COLLECTION, pondId)
     const snap = await getDoc(ref)
@@ -115,9 +112,7 @@ export const feedingScheduleService = {
     }
   },
 
-  /**
-   * Live updates for the pond's single schedule.
-   */
+  /** Live updates for the pond's single schedule. */
   subscribeByPond(pondId: string, cb: (schedule: FeedingSchedule | null) => void): () => void {
     const ref = doc(db, COLLECTION, pondId)
     return onSnapshot(ref, (snap) => {
@@ -152,11 +147,7 @@ export const feedingScheduleService = {
     })
   },
 
-  /**
-   * Create OR update the schedule for a pond (single doc, id = pondId).
-   * On first save → sets createdBy/createdAt.
-   * On every save → updates lastUpdatedBy/updatedAt.
-   */
+  /** Create OR update the schedule for a pond (single doc, id = pondId). */
   async upsert(
     userId: string,
     data: CreateFeedingScheduleData,
@@ -184,7 +175,6 @@ export const feedingScheduleService = {
     }
 
     if (!snap.exists()) {
-      // create
       await setDoc(ref, {
         ...base,
         createdAt: serverTimestamp(),
@@ -195,12 +185,11 @@ export const feedingScheduleService = {
         },
       })
     } else {
-      // update
       await updateDoc(ref, base)
     }
   },
 
-  /** Soft-disable schedule (kept just in case you want it). */
+  /** Soft-disable schedule */
   async deactivate(pondId: string): Promise<void> {
     const ref = doc(db, COLLECTION, pondId)
     const snap = await getDoc(ref)
