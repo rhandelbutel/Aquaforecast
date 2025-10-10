@@ -1,4 +1,3 @@
-// lib/mortality-service.ts
 import {
   collection,
   addDoc,
@@ -43,12 +42,7 @@ export const addMortalityLog = async (mortalityData: Omit<MortalityLog, "id" | "
   }
 }
 
-/**
- * NEW: Update only the mortalityRate of a log.
- * Safeguards:
- * - validates 0..100
- * - verifies the log belongs to the provided pondId before updating
- */
+/** Update only the mortalityRate (0..100) of a specific log id, after verifying pond ownership. */
 export const updateMortalityLogRate = async (
   pondId: string,
   logId: string,
@@ -66,7 +60,6 @@ export const updateMortalityLogRate = async (
   }
   const data = snap.data() as any
   if (data?.pondId !== pondId) {
-    // Extra safety so a UI bug can't update a different pond's record
     throw new Error("Log does not belong to the specified pond")
   }
 
@@ -83,11 +76,7 @@ export const getMortalityLogs = async (pondId: string): Promise<MortalityLog[]> 
         if (!val) return new Date(0)
         if (val instanceof Date) return val
         if (typeof val?.toDate === "function") {
-          try {
-            return val.toDate() as Date
-          } catch {
-            return new Date(0)
-          }
+          try { return val.toDate() as Date } catch { return new Date(0) }
         }
         if (typeof val?.seconds === "number") return new Date(val.seconds * 1000)
         if (typeof val === "string") {
@@ -107,7 +96,6 @@ export const getMortalityLogs = async (pondId: string): Promise<MortalityLog[]> 
         createdAt: toSafeDate(data.createdAt),
       } as MortalityLog
     })
-    // Sort client-side by date desc to avoid index
     return logs.sort((a, b) => (b.date?.getTime?.() ?? 0) - (a.date?.getTime?.() ?? 0))
   } catch (error) {
     console.error("Error getting mortality logs:", error)
@@ -127,11 +115,7 @@ export const subscribeMortalityLogs = (
         if (!val) return new Date(0)
         if (val instanceof Date) return val
         if (typeof val?.toDate === "function") {
-          try {
-            return val.toDate() as Date
-          } catch {
-            return new Date(0)
-          }
+          try { return val.toDate() as Date } catch { return new Date(0) }
         }
         if (typeof val?.seconds === "number") return new Date(val.seconds * 1000)
         if (typeof val === "string") {
@@ -157,7 +141,6 @@ export const subscribeMortalityLogs = (
 }
 
 export const computeSurvivalRateFromLogs = (logs: MortalityLog[], initialRate = 100): number => {
-  // Sum mortality rates; clamp 0-100; survival = 100 - totalMortality
   const totalMortality = logs.reduce((sum, log) => {
     const rate = typeof log.mortalityRate === "number" ? log.mortalityRate : 0
     return sum + Math.max(0, Math.min(100, rate))
@@ -177,7 +160,6 @@ export const resetMortalityLogs = async (pondId: string): Promise<void> => {
       batch.delete(d.ref)
       opCount++
       if (opCount === 450) {
-        // stay under 500 write limit
         await batch.commit()
         batch = writeBatch(db)
         opCount = 0
@@ -196,4 +178,77 @@ export const calculateSurvivalRate = (initialCount: number, totalDeaths: number)
   if (initialCount === 0) return 0
   const alive = initialCount - totalDeaths
   return Math.max(0, (alive / initialCount) * 100)
+}
+
+/* ---------- NEW HELPERS (same-day upsert & cadence-aware create) ---------- */
+
+const sameDay = (a: Date, b: Date) => {
+  return a.getFullYear() === b.getFullYear() &&
+         a.getMonth() === b.getMonth() &&
+         a.getDate() === b.getDate()
+}
+
+/** Find a mortality log for the same calendar day, if any. */
+export async function findMortalityLogByDate(pondId: string, date: Date): Promise<MortalityLog | null> {
+  const logs = await getMortalityLogs(pondId)
+  const found = logs.find(l => l.date && sameDay(new Date(l.date), date))
+  return found ?? null
+}
+
+/** Upsert: if a log exists for the date → update rate; otherwise create one. */
+export async function upsertMortalityRateForDate(params: {
+  pondId: string
+  pondName: string
+  userId: string
+  date: Date
+  mortalityRate: number
+}): Promise<void> {
+  const rate = Number(params.mortalityRate)
+  if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+    throw new Error("mortalityRate must be between 0 and 100")
+  }
+  const existing = await findMortalityLogByDate(params.pondId, params.date)
+  if (existing?.id) {
+    await updateMortalityLogRate(params.pondId, existing.id, rate)
+  } else {
+    await addMortalityLog({
+      pondId: params.pondId,
+      pondName: params.pondName,
+      userId: params.userId,
+      date: params.date,
+      mortalityRate: rate,
+    } as MortalityLog)
+  }
+}
+
+/**
+ * Create a **new** mortality doc enforcing monotonicity:
+ * the new rate must be >= the latest previous rate (if any).
+ * Use this when a new 15-day ABW period begins.
+ */
+export async function createMortalityLogMonotonic(params: {
+  pondId: string
+  pondName: string
+  userId: string
+  date: Date
+  mortalityRate: number
+}): Promise<string> {
+  const rate = Number(params.mortalityRate)
+  if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+    throw new Error("mortalityRate must be between 0 and 100")
+  }
+
+  const logs = await getMortalityLogs(params.pondId)
+  const prev = logs[0]?.mortalityRate
+  if (typeof prev === "number" && rate < prev) {
+    throw new Error(`Mortality must be ≥ previous (${prev}%).`)
+  }
+
+  return await addMortalityLog({
+    pondId: params.pondId,
+    pondName: params.pondName,
+    userId: params.userId,
+    date: params.date,
+    mortalityRate: rate,
+  } as MortalityLog)
 }
