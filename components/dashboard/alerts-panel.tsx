@@ -1,4 +1,3 @@
-// components/alerts/alerts-panel.tsx
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
@@ -9,14 +8,13 @@ import { AlertTriangle, Info, CheckCircle, XCircle } from "lucide-react"
 import type { UnifiedPond } from "@/lib/pond-context"
 import { useAuth } from "@/lib/auth-context"
 
-// feeds/survival/abw imports (unchanged)
+// feeds/survival imports
 import { feedingScheduleService, type FeedingSchedule } from "@/lib/feeding-schedule-service"
 import { subscribeFeedingLogs, type FeedingLog } from "@/lib/feeding-service"
 import { subscribeMortalityLogs, computeSurvivalRateFromLogs, type MortalityLog } from "@/lib/mortality-service"
-import { GrowthService } from "@/lib/growth-service"
 
 // 🔔 snoozes
-import { subscribeSnoozes, setSnooze, setSnoozes, pruneExpiredSnoozes, type SnoozeMap } from "@/lib/alert-snooze-service"
+import { subscribeSnoozes, setSnooze, setSnoozes, type SnoozeMap } from "@/lib/alert-snooze-service"
 
 // 🔒 alerts store in Firestore
 import { materializeAlerts, subscribeActiveAlerts, type StoredAlert } from "@/lib/alert-store-service"
@@ -48,7 +46,6 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
   const [schedules, setSchedules] = useState<FeedingSchedule[]>([])
   const [feedingLogs, setFeedingLogs] = useState<FeedingLog[]>([])
   const [mortalityLogs, setMortalityLogs] = useState<MortalityLog[]>([])
-  const [lastABWUpdate, setLastABWUpdate] = useState<Date | null>(null)
 
   // snoozes
   const [dismissedUntil, setDismissedUntil] = useState<SnoozeMap>({})
@@ -66,7 +63,7 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
     return unsub
   }, [uid])
 
-  // data subscriptions (unchanged)
+  // data subscriptions
   useEffect(() => {
     if (!pondId) return
 
@@ -82,24 +79,6 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
 
     const unsubFeed = subscribeFeedingLogs(pondId, (logs: FeedingLog[] = []) => setFeedingLogs(logs))
     const unsubMort = subscribeMortalityLogs(pondId, (logs: MortalityLog[] = []) => setMortalityLogs(logs))
-
-    ;(async () => {
-      try {
-        const setup = await GrowthService.getGrowthSetup(pondId, "shared")
-        if (setup?.lastABWUpdate) {
-          const d =
-            (setup.lastABWUpdate as any)?.toDate?.() ??
-            (typeof (setup.lastABWUpdate as any)?.seconds === "number"
-              ? new Date((setup.lastABWUpdate as any).seconds * 1000)
-              : new Date(setup.lastABWUpdate as any))
-          setLastABWUpdate(d || null)
-        } else {
-          setLastABWUpdate(null)
-        }
-      } catch {
-        setLastABWUpdate(null)
-      }
-    })()
 
     return () => {
       try { unsubSchedule() } catch {}
@@ -141,46 +120,61 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
     return todayMins.length ? Math.min(...todayMins) : null
   }, [schedules])
 
-  // compute base alerts (same rules) — but DON'T render these directly
+  // compute base alerts (ABW alerts removed per request)
   const baseAlerts = useMemo<AlertItem[]>(() => {
     const list: AlertItem[] = []
     const now = new Date()
 
     const overdueMins = minutesAgo(latestFeedAt)
     if (Number.isFinite(overdueMins) && overdueMins > 120) {
-      list.push({ id: "feed-overdue", type: "warning", title: "Feeding overdue",
-        message: `No feeding recorded for ${overdueMins} minutes.`, when: now, severity: "medium" })
+      list.push({
+        id: "feed-overdue",
+        type: "warning",
+        title: "Feeding overdue",
+        message: `No feeding recorded for ${overdueMins} minutes.`,
+        when: now,
+        severity: "medium",
+      })
     }
+
     if (nextScheduledMinutes !== null && nextScheduledMinutes <= 50 && nextScheduledMinutes >= 0) {
-      list.push({ id: "feed-soon", type: "info", title: "Feeding due soon",
-        message: `Next scheduled feeding in ${nextScheduledMinutes} minutes.`, when: now, severity: "low" })
+      list.push({
+        id: "feed-soon",
+        type: "info",
+        title: "Feeding due soon",
+        message: `Next scheduled feeding in ${nextScheduledMinutes} minutes.`,
+        when: now,
+        severity: "low",
+      })
     }
+
     if (survivalPct < 80) {
-      list.push({ id: "low-survival", type: "warning", title: "Survival below 80%",
+      list.push({
+        id: "low-survival",
+        type: "warning",
+        title: "Survival below 80%",
         message: `Estimated fish alive: ${estAlive.toLocaleString()} (${survivalPct.toFixed(1)}% survival).`,
-        when: now, severity: "medium" })
+        when: now,
+        severity: "medium",
+      })
     }
-    if (lastABWUpdate) {
-      const days = Math.floor((Date.now() - lastABWUpdate.getTime()) / (1000 * 60 * 60 * 24))
-      if (days >= 7) {
-        list.push({ id: "abw-due", type: "info", title: "ABW measurement due",
-          message: `It’s been ${days} days since the last ABW update.`, when: now, severity: "low" })
-      }
-    } else {
-      list.push({ id: "abw-missing", type: "info", title: "ABW not set",
-        message: "No ABW measurement has been recorded yet.", when: now, severity: "low" })
-    }
+
     if (list.length === 0) {
-      list.push({ id: "all-good", type: "success", title: "All systems normal",
-        message: "No alerts at this time.", when: now, severity: "low" })
+      list.push({
+        id: "all-good",
+        type: "success",
+        title: "All systems normal",
+        message: "No alerts at this time.",
+        when: now,
+        severity: "low",
+      })
     }
     return list
-  }, [latestFeedAt, nextScheduledMinutes, survivalPct, estAlive, lastABWUpdate])
+  }, [latestFeedAt, nextScheduledMinutes, survivalPct, estAlive])
 
   // 🔴 MATERIALIZE to Firestore whenever baseAlerts change
   useEffect(() => {
     if (!pondId) return
-    // give each a stable, per-pond id
     const toStore = baseAlerts.map(a => ({
       id: `${pondId}:${a.id}`,
       type: a.type,
@@ -276,7 +270,6 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
                   </div>
                   <p className="text-sm text-gray-600 mt-1">{alert.message}</p>
                   <p className="text-xs text-gray-500 mt-2">
-                    {/* updatedAt is a Timestamp; show local time */}
                     {alert.updatedAt?.toDate
                       ? alert.updatedAt.toDate().toLocaleTimeString()
                       : ""}

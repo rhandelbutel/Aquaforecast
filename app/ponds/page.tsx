@@ -1,11 +1,14 @@
 "use client"
 
-import { usePonds } from '@/lib/pond-context'
-import { EmptyPonds } from '@/components/ponds/empty-ponds'
-import { PondsWithData } from '@/components/ponds/ponds-with-data'
+import { useState } from "react"
+import { usePonds } from "@/lib/pond-context"
+import { EmptyPonds } from "@/components/ponds/empty-ponds"
+import { PondsWithData } from "@/components/ponds/ponds-with-data"
+import HarvestModal from "@/components/admin/harvest-modal"
 
 export default function PondsPage() {
   const { ponds, loading } = usePonds()
+  const [harvestOpen, setHarvestOpen] = useState(false)
 
   if (loading) {
     return (
@@ -22,5 +25,16 @@ export default function PondsPage() {
     return <EmptyPonds />
   }
 
-  return <PondsWithData ponds={ponds} />
+  return (
+    <>
+      {/* Header renders both buttons; we just provide the handler for Harvest */}
+      <PondsWithData ponds={ponds} onClickHarvest={() => setHarvestOpen(true)} />
+
+      <HarvestModal
+        open={harvestOpen}
+        onOpenChange={setHarvestOpen}
+        ponds={ponds}
+      />
+    </>
+  )
 }
