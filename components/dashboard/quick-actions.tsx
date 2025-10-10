@@ -13,6 +13,7 @@ import { GrowthSetupModal } from "@/components/growth/growth-setup-modal"
 
 import type { UnifiedPond } from "@/lib/pond-context"
 import { feedingScheduleService, type FeedingSchedule } from "@/lib/feeding-schedule-service"
+import { GrowthService } from "@/lib/growth-service"
 
 interface QuickActionsProps {
   pond: UnifiedPond
@@ -28,18 +29,49 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
   const [showMortalityModal, setShowMortalityModal] = useState(false)
   const [showGrowthSetupModal, setShowGrowthSetupModal] = useState(false)
 
-  // ---- Schedule (for the "Before schedule" badge) ----
   const sharedPondId = (pond as any)?.adminPondId || pond?.id
-  const [schedule, setSchedule] = useState<FeedingSchedule | null>(null)
 
+  // ---- Schedule (for the "Before schedule" badge) ----
+  const [schedule, setSchedule] = useState<FeedingSchedule | null>(null)
   useEffect(() => {
     if (!sharedPondId) return
     const unsub = feedingScheduleService.subscribeByPond(sharedPondId, (s) => setSchedule(s))
     return () => { try { unsub?.() } catch {} }
   }, [sharedPondId])
 
-  // ---- Ticker so the badge updates without manual refresh ----
-  // updates every 15s; also updates immediately when tab becomes visible again
+  // ---- Growth setup state (for “Set up” & 15d badges) ----
+  const [growthHasSetup, setGrowthHasSetup] = useState(false)
+  const [growthHasTarget, setGrowthHasTarget] = useState(false)
+  const [lastABWUpdate, setLastABWUpdate] = useState<Date | null>(null)
+
+  useEffect(() => {
+    if (!sharedPondId) return
+    const unsub = GrowthService.subscribeGrowthSetup(sharedPondId, (setup) => {
+      if (!setup) {
+        setGrowthHasSetup(false)
+        setGrowthHasTarget(false)
+        setLastABWUpdate(null)
+        return
+      }
+      setGrowthHasSetup(true)
+      setGrowthHasTarget(typeof (setup as any).targetWeight === "number" && (setup as any).targetWeight > 0)
+
+      const raw = (setup as any).lastABWUpdate
+      let d: Date | null = null
+      if (raw?.toDate) {
+        try { d = raw.toDate() as Date } catch { d = null }
+      } else if (typeof raw?.seconds === "number") {
+        d = new Date(raw.seconds * 1000)
+      } else if (raw) {
+        const t = new Date(raw)
+        d = isNaN(t.getTime()) ? null : t
+      }
+      setLastABWUpdate(d)
+    })
+    return () => { try { unsub?.() } catch {} }
+  }, [sharedPondId])
+
+  // ---- Ticker so badges update without manual refresh ----
   const [nowTick, setNowTick] = useState(() => Date.now())
   useEffect(() => {
     const tick = () => setNowTick(Date.now())
@@ -52,7 +84,7 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
     }
   }, [])
 
-  // Helpers to work with local time
+  // Helpers to work with local time (feeding)
   const makeDateForTime = (hhmm: string, base: Date) => {
     const [hh, mm] = (hhmm || "00:00").split(":").map((v) => Number(v))
     const d = new Date(base)
@@ -87,6 +119,20 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
     return min > 0 && min <= 15 ? min : null
   }, [schedule, nowTick])
 
+  // ----- Badge: Growth 15d+ when lastABWUpdate is >= 15 days ago -----
+  const growthDaysSince = useMemo(() => {
+    if (!lastABWUpdate) return null
+    const ms = Date.now() - lastABWUpdate.getTime()
+    if (ms < 0) return 0
+    return Math.floor(ms / 86_400_000)
+  }, [lastABWUpdate, nowTick])
+
+  const showGrowthSetUpBadge = !growthHasSetup || !growthHasTarget
+  const showGrowth15dBadge = !showGrowthSetUpBadge && growthDaysSince != null && growthDaysSince >= 15
+
+  // Mortality follows ABW cadence: show the same "Due" when growth is due
+  const showMortalityDueBadge = showGrowth15dBadge
+
   if (!pond) return null
 
   const handleFeedFish = () => setShowFeedingModal(true)
@@ -115,6 +161,48 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
     )
   }
 
+  const renderGrowthButton = () => {
+    return (
+      <Button
+        variant="outline"
+        className="relative w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
+        onClick={handleGrowthSetup}
+      >
+        <Scale className="h-6 w-6 text-blue-600" />
+        <span className="text-sm">Growth Setup</span>
+
+        {showGrowthSetUpBadge && (
+          <span className="absolute -top-2 -right-2 rounded-full bg-indigo-600 text-white text-[10px] px-2 py-0.5 shadow">
+            Set up
+          </span>
+        )}
+        {showGrowth15dBadge && (
+          <span className="absolute -top-2 -right-2 rounded-full bg-indigo-600 text-white text-[10px] px-2 py-0.5 shadow">
+            {growthDaysSince}d
+          </span>
+        )}
+      </Button>
+    )
+  }
+
+  const renderMortalityButton = () => {
+    return (
+      <Button
+        variant="outline"
+        className="relative w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
+        onClick={handleMortalityLog}
+      >
+        <TrendingDown className="h-6 w-6 text-red-600" />
+        <span className="text-sm">Mortality Log</span>
+        {showMortalityDueBadge && (
+          <span className="absolute -top-2 -right-2 rounded-full bg-indigo-600 text-white text-[10px] px-2 py-0.5 shadow">
+            Due
+          </span>
+        )}
+      </Button>
+    )
+  }
+
   return (
     <>
       <Card>
@@ -125,28 +213,33 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4 items-stretch">
             {renderFeedButton()}
+            {renderGrowthButton()}
 
-            <Button variant="outline" className="w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent" onClick={handleGrowthSetup}>
-              <Scale className="h-6 w-6 text-blue-600" />
-              <span className="text-sm">Growth Setup</span>
-            </Button>
-
-            <Button variant="outline" className="w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent" onClick={handleScheduleFeeding}>
+            <Button
+              variant="outline"
+              className="w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
+              onClick={handleScheduleFeeding}
+            >
               <Calendar className="h-6 w-6 text-green-600" />
               <span className="text-sm">Schedule Feed</span>
             </Button>
 
-            <Button variant="outline" className="w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent" onClick={handleMortalityLog}>
-              <TrendingDown className="h-6 w-6 text-red-600" />
-              <span className="text-sm">Mortality Log</span>
-            </Button>
+            {renderMortalityButton()}
 
-            <Button variant="outline" className="w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent" onClick={handleExportData}>
+            <Button
+              variant="outline"
+              className="w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
+              onClick={handleExportData}
+            >
               <Download className="h-6 w-6 text-purple-600" />
               <span className="text-sm">Export Data</span>
             </Button>
 
-            <Button variant="outline" className="w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent" onClick={handleOpenSettings}>
+            <Button
+              variant="outline"
+              className="w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
+              onClick={handleOpenSettings}
+            >
               <SettingsIcon className="h-6 w-6 text-orange-600" />
               <span className="text-sm">Settings</span>
             </Button>
