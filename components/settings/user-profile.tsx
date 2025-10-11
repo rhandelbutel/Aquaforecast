@@ -1,3 +1,4 @@
+// components/settings/user-profile.tsx
 "use client"
 
 import type React from "react"
@@ -16,11 +17,11 @@ import { useToast } from "@/hooks/use-toast"
 
 export function UserProfile() {
   const { user } = useAuth()
-  const { userProfile } = useUser() // ❌ no more refreshProfile
+  const { userProfile } = useUser()
   const { toast } = useToast()
 
   const [fullName, setFullName] = useState("")
-  const [phone, setPhone] = useState("") // store digits-only here
+  const [phone, setPhone] = useState("") // digits-only
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState("")
   const [error, setError] = useState("")
@@ -35,22 +36,21 @@ export function UserProfile() {
   const sanitizePhone = (v: string) => v.replace(/\D/g, "").slice(0, 11)
   const isPhoneEmpty = phone.length === 0
   const isPhoneValid = isPhoneEmpty || /^[0-9]{11}$/.test(phone) // allow empty or exactly 11 digits
+  const phoneMissing = originalPhone.length === 0
 
-  // when profile changes (via realtime), sync local fields
+  // sync from profile
   useEffect(() => {
     if (!userProfile) return
     setFullName(originalFullName)
     setPhone(originalPhone)
 
     const hasSavedPhone = originalPhone.length > 0
-    setIsEditingPhone(!hasSavedPhone) // if saved, start locked; otherwise editable
+    setIsEditingPhone(!hasSavedPhone)
   }, [userProfile, originalFullName, originalPhone])
 
-  // focus phone when entering edit mode
+  // focus when enabling edit
   useEffect(() => {
-    if (isEditingPhone) {
-      setTimeout(() => phoneRef.current?.focus(), 0)
-    }
+    if (isEditingPhone) setTimeout(() => phoneRef.current?.focus(), 0)
   }, [isEditingPhone])
 
   const hasChanges = useMemo(() => {
@@ -63,10 +63,8 @@ export function UserProfile() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!user) return
-    if (!hasChanges) return
+    if (!user || !hasChanges) return
 
-    // block invalid phone before saving
     if (!isPhoneValid) {
       setError("Phone number must be exactly 11 digits.")
       return
@@ -77,31 +75,20 @@ export function UserProfile() {
     setSuccess("")
 
     try {
-      const cleanedPhone = phone // digits-only & max 11
+      const cleanedPhone = phone
       const cleanedFullName = fullName.trim()
 
       const updates: UpdatableProfile = {}
+      if (cleanedFullName.length > 0) updates.fullName = cleanedFullName
+      else if ((userProfile?.fullName ?? "") !== "") updates.fullName = null
 
-      // fullName: set new, or clear (null) if user erased an existing one
-      if (cleanedFullName.length > 0) {
-        updates.fullName = cleanedFullName
-      } else if ((userProfile?.fullName ?? "") !== "") {
-        updates.fullName = null
-      }
-
-      // phone: set new, or clear (null) if user erased an existing one
-      if (cleanedPhone.length > 0) {
-        updates.phone = cleanedPhone
-      } else if ((userProfile?.phone ?? "") !== "") {
-        updates.phone = null
-      }
+      if (cleanedPhone.length > 0) updates.phone = cleanedPhone
+      else if ((userProfile?.phone ?? "") !== "") updates.phone = null
 
       await updateUserProfile(user.uid, updates)
 
       setSuccess("Profile updated successfully!")
       toast({ title: "Saved", description: "Your profile changes have been saved." })
-
-      // ✅ No manual refresh — realtime listener in user-context will update this view
       if (cleanedPhone.length > 0) setIsEditingPhone(false)
     } catch (err) {
       console.error("Error updating profile:", err)
@@ -139,13 +126,7 @@ export function UserProfile() {
           {userProfile?.role === "user" && (
             <div className="space-y-2">
               <Label htmlFor="studentId">Student ID</Label>
-              <Input
-                id="studentId"
-                type="text"
-                value={userProfile?.studentId ?? ""}
-                disabled
-                className="bg-gray-50"
-              />
+              <Input id="studentId" type="text" value={userProfile?.studentId ?? ""} disabled className="bg-gray-50" />
               <p className="text-xs text-gray-500">Student ID cannot be changed</p>
             </div>
           )}
@@ -156,9 +137,17 @@ export function UserProfile() {
             <p className="text-xs text-gray-500">Email cannot be changed</p>
           </div>
 
-          {/* Phone with edit icon */}
+          {/* Phone with edit and REQUIRED badge if missing */}
           <div className="space-y-2">
-            <Label htmlFor="phone">Phone</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="phone">Phone</Label>
+              {phoneMissing && (
+                <span className="rounded-full bg-red-600 text-white text-[10px] px-2 py-0.5">
+                  Required
+                </span>
+              )}
+            </div>
+
             <div className="relative">
               {showPhoneEditButton && (
                 <button
@@ -177,7 +166,6 @@ export function UserProfile() {
                 type="tel"
                 inputMode="numeric"
                 enterKeyHint="done"
-                // pattern matches full string; \d can be inconsistent across UAs
                 pattern="^[0-9]{11}$"
                 maxLength={11}
                 autoComplete="tel"
@@ -192,10 +180,12 @@ export function UserProfile() {
                 ].join(" ")}
               />
             </div>
-            <p className={`text-xs ${!isPhoneValid ? "text-red-600" : "text-gray-500"}`}>
+            <p className={`text-xs ${!isPhoneValid ? "text-red-600" : phoneMissing ? "text-red-600" : "text-gray-500"}`}>
               {showPhoneEditButton && !isEditingPhone
                 ? "Tap the pencil to edit your saved number"
-                : "Only digits allowed. Must be exactly 11 digits (e.g., 09XXXXXXXXX)."}
+                : phoneMissing
+                  ? "Add your 11-digit phone number (e.g., 09XXXXXXXXX) to complete your profile."
+                  : "Only digits allowed. Must be exactly 11 digits (e.g., 09XXXXXXXXX)."}
             </p>
           </div>
 

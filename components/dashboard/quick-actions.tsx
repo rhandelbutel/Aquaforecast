@@ -1,3 +1,4 @@
+// components/dashboard/quick-actions.tsx
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
@@ -13,7 +14,9 @@ import { GrowthSetupModal } from "@/components/growth/growth-setup-modal"
 
 import type { UnifiedPond } from "@/lib/pond-context"
 import { feedingScheduleService, type FeedingSchedule } from "@/lib/feeding-schedule-service"
-import { GrowthService } from "@/lib/growth-service"
+import { subscribeMortalityLogs, type MortalityLog } from "@/lib/mortality-service"
+import { useAuth } from "@/lib/auth-context"
+import { subscribeUserProfile } from "@/lib/user-service"
 
 interface QuickActionsProps {
   pond: UnifiedPond
@@ -21,8 +24,11 @@ interface QuickActionsProps {
   onGrowthUpdate?: () => void
 }
 
+const DAY_MS = 86_400_000
+
 export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickActionsProps) {
   const router = useRouter()
+  const { user } = useAuth()
 
   const [showFeedingModal, setShowFeedingModal] = useState(false)
   const [showScheduleModal, setShowScheduleModal] = useState(false)
@@ -31,7 +37,17 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
 
   const sharedPondId = (pond as any)?.adminPondId || pond?.id
 
-  // ---- Schedule (for the "Before schedule" badge) ----
+  // ---- User phone badge (Settings) ----
+  const [hasPhone, setHasPhone] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (!user?.uid) return
+    const unsub = subscribeUserProfile(user.uid, (p) => {
+      setHasPhone(!!(p?.phone && p.phone.trim().length > 0))
+    })
+    return () => { try { unsub?.() } catch {} }
+  }, [user?.uid])
+
+  // ---- Schedule (for badges) ----
   const [schedule, setSchedule] = useState<FeedingSchedule | null>(null)
   useEffect(() => {
     if (!sharedPondId) return
@@ -39,52 +55,27 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
     return () => { try { unsub?.() } catch {} }
   }, [sharedPondId])
 
-  // ---- Growth setup state (for “Set up” & 15d badges) ----
-  const [growthHasSetup, setGrowthHasSetup] = useState(false)
-  const [growthHasTarget, setGrowthHasTarget] = useState(false)
-  const [lastABWUpdate, setLastABWUpdate] = useState<Date | null>(null)
-
+  // ---- Mortality cadence ----
+  const [lastMortalityDate, setLastMortalityDate] = useState<Date | null>(null)
   useEffect(() => {
     if (!sharedPondId) return
-    const unsub = GrowthService.subscribeGrowthSetup(sharedPondId, (setup) => {
-      if (!setup) {
-        setGrowthHasSetup(false)
-        setGrowthHasTarget(false)
-        setLastABWUpdate(null)
-        return
-      }
-      setGrowthHasSetup(true)
-      setGrowthHasTarget(typeof (setup as any).targetWeight === "number" && (setup as any).targetWeight > 0)
-
-      const raw = (setup as any).lastABWUpdate
-      let d: Date | null = null
-      if (raw?.toDate) {
-        try { d = raw.toDate() as Date } catch { d = null }
-      } else if (typeof raw?.seconds === "number") {
-        d = new Date(raw.seconds * 1000)
-      } else if (raw) {
-        const t = new Date(raw)
-        d = isNaN(t.getTime()) ? null : t
-      }
-      setLastABWUpdate(d)
+    const unsub = subscribeMortalityLogs(sharedPondId, (logs: MortalityLog[]) => {
+      setLastMortalityDate(logs[0]?.date ?? null)
     })
     return () => { try { unsub?.() } catch {} }
   }, [sharedPondId])
 
-  // ---- Ticker so badges update without manual refresh ----
+  // tick for minute-level badges
   const [nowTick, setNowTick] = useState(() => Date.now())
   useEffect(() => {
     const tick = () => setNowTick(Date.now())
     const id = setInterval(tick, 15000)
     const onVis = () => { if (document.visibilityState === "visible") tick() }
     document.addEventListener("visibilitychange", onVis)
-    return () => {
-      clearInterval(id)
-      document.removeEventListener("visibilitychange", onVis)
-    }
+    return () => { clearInterval(id); document.removeEventListener("visibilitychange", onVis) }
   }, [])
 
-  // Helpers to work with local time (feeding)
+  // feeding helpers
   const makeDateForTime = (hhmm: string, base: Date) => {
     const [hh, mm] = (hhmm || "00:00").split(":").map((v) => Number(v))
     const d = new Date(base)
@@ -109,99 +100,39 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
     return null
   }
 
-  // ----- Badge: "Before schedule" (minutes until next feed) -----
+  const toHHMM = (d: Date) => {
+    const h = String(d.getHours()).padStart(2, "0")
+    const m = String(d.getMinutes()).padStart(2, "0")
+    return `${h}:${m}`
+  }
+
+  // exact-time FEED badge
+  const feedNow = useMemo(() => {
+    if (!schedule) return false
+    const now = new Date(nowTick)
+    if (!dayMatches(schedule, now)) return false
+    const nowHHMM = toHHMM(now)
+    return schedule.feedingTimes.some((t) => t === nowHHMM)
+  }, [schedule, nowTick])
+
+  // "Due X min" within next 15 min (hidden while feedNow)
   const dueInMin = useMemo(() => {
+    if (feedNow) return null
     const now = new Date(nowTick)
     const next = findNextScheduled(schedule, now)
     if (!next) return null
     const ms = next.getTime() - now.getTime()
     const min = Math.ceil(ms / 60000)
     return min > 0 && min <= 15 ? min : null
-  }, [schedule, nowTick])
+  }, [schedule, nowTick, feedNow])
 
-  // ----- Badge: Growth 15d+ when lastABWUpdate is >= 15 days ago -----
-  const growthDaysSince = useMemo(() => {
-    if (!lastABWUpdate) return null
-    const ms = Date.now() - lastABWUpdate.getTime()
-    if (ms < 0) return 0
-    return Math.floor(ms / 86_400_000)
-  }, [lastABWUpdate, nowTick])
-
-  const showGrowthSetUpBadge = !growthHasSetup || !growthHasTarget
-  const showGrowth15dBadge = !showGrowthSetUpBadge && growthDaysSince != null && growthDaysSince >= 15
-
-  // Mortality follows ABW cadence: show the same "Due" when growth is due
-  const showMortalityDueBadge = showGrowth15dBadge
+  const mortalityDue = useMemo(() => {
+    if (!lastMortalityDate) return true
+    const days = Math.floor((Date.now() - lastMortalityDate.getTime()) / DAY_MS)
+    return days >= 15
+  }, [lastMortalityDate, nowTick])
 
   if (!pond) return null
-
-  const handleFeedFish = () => setShowFeedingModal(true)
-  const handleGrowthSetup = () => setShowGrowthSetupModal(true)
-  const handleScheduleFeeding = () => setShowScheduleModal(true)
-  const handleMortalityLog = () => setShowMortalityModal(true)
-  const handleExportData = () => console.log("Export data action triggered")
-  const handleOpenSettings = () => router.push(`/settings?pond=${encodeURIComponent(pond.id)}`)
-
-  const renderFeedButton = () => {
-    const showBefore = dueInMin !== null
-    return (
-      <Button
-        variant="outline"
-        className="relative w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
-        onClick={handleFeedFish}
-      >
-        <Fish className="h-6 w-6 text-cyan-600" />
-        <span className="text-sm">Feed Fish</span>
-        {showBefore && (
-          <span className="absolute -top-2 -right-2 rounded-full bg-amber-500 text-white text-[10px] px-2 py-0.5 shadow">
-            Due {dueInMin} min
-          </span>
-        )}
-      </Button>
-    )
-  }
-
-  const renderGrowthButton = () => {
-    return (
-      <Button
-        variant="outline"
-        className="relative w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
-        onClick={handleGrowthSetup}
-      >
-        <Scale className="h-6 w-6 text-blue-600" />
-        <span className="text-sm">Growth Setup</span>
-
-        {showGrowthSetUpBadge && (
-          <span className="absolute -top-2 -right-2 rounded-full bg-indigo-600 text-white text-[10px] px-2 py-0.5 shadow">
-            Set up
-          </span>
-        )}
-        {showGrowth15dBadge && (
-          <span className="absolute -top-2 -right-2 rounded-full bg-indigo-600 text-white text-[10px] px-2 py-0.5 shadow">
-            {growthDaysSince}d
-          </span>
-        )}
-      </Button>
-    )
-  }
-
-  const renderMortalityButton = () => {
-    return (
-      <Button
-        variant="outline"
-        className="relative w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
-        onClick={handleMortalityLog}
-      >
-        <TrendingDown className="h-6 w-6 text-red-600" />
-        <span className="text-sm">Mortality Log</span>
-        {showMortalityDueBadge && (
-          <span className="absolute -top-2 -right-2 rounded-full bg-indigo-600 text-white text-[10px] px-2 py-0.5 shadow">
-            Due
-          </span>
-        )}
-      </Button>
-    )
-  }
 
   return (
     <>
@@ -212,36 +143,85 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4 items-stretch">
-            {renderFeedButton()}
-            {renderGrowthButton()}
+            {/* Feed */}
+            <Button
+              variant="outline"
+              className="relative w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
+              onClick={() => setShowFeedingModal(true)}
+            >
+              <Fish className="h-6 w-6 text-cyan-600" />
+              <span className="text-sm">Feed Fish</span>
 
+              {feedNow && (
+                <span className="absolute -top-2 -right-2 rounded-full bg-green-600 text-white text-[10px] px-2 py-0.5 shadow">
+                  Feed
+                </span>
+              )}
+              {!feedNow && dueInMin !== null && (
+                <span className="absolute -top-2 -right-2 rounded-full bg-amber-500 text-white text-[10px] px-2 py-0.5 shadow">
+                  Due {dueInMin} min
+                </span>
+              )}
+            </Button>
+
+            {/* Growth setup */}
+            <Button
+              variant="outline"
+              className="relative w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
+              onClick={() => setShowGrowthSetupModal(true)}
+            >
+              <Scale className="h-6 w-6 text-blue-600" />
+              <span className="text-sm">Growth Setup</span>
+            </Button>
+
+            {/* Schedule feeding */}
             <Button
               variant="outline"
               className="w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
-              onClick={handleScheduleFeeding}
+              onClick={() => setShowScheduleModal(true)}
             >
               <Calendar className="h-6 w-6 text-green-600" />
               <span className="text-sm">Schedule Feed</span>
             </Button>
 
-            {renderMortalityButton()}
+            {/* Mortality log */}
+            <Button
+              variant="outline"
+              className="relative w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
+              onClick={() => setShowMortalityModal(true)}
+            >
+              <TrendingDown className="h-6 w-6 text-red-600" />
+              <span className="text-sm">Mortality Log</span>
+              {mortalityDue && (
+                <span className="absolute -top-2 -right-2 rounded-full bg-indigo-600 text-white text-[10px] px-2 py-0.5 shadow">
+                  Due
+                </span>
+              )}
+            </Button>
 
+            {/* Export */}
             <Button
               variant="outline"
               className="w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
-              onClick={handleExportData}
+              onClick={() => console.log("Export data")}
             >
               <Download className="h-6 w-6 text-purple-600" />
               <span className="text-sm">Export Data</span>
             </Button>
 
+            {/* Settings with red badge if phone missing */}
             <Button
               variant="outline"
-              className="w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
-              onClick={handleOpenSettings}
+              className="relative w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
+              onClick={() => router.push(`/settings?pond=${encodeURIComponent(pond.id)}`)}
             >
               <SettingsIcon className="h-6 w-6 text-orange-600" />
               <span className="text-sm">Settings</span>
+              {hasPhone === false && (
+                <span className="absolute -top-2 -right-2 rounded-full bg-red-600 text-white text-[10px] px-2 py-0.5 shadow">
+                  Add phone
+                </span>
+              )}
             </Button>
           </div>
         </CardContent>

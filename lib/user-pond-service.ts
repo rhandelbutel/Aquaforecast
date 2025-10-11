@@ -65,6 +65,7 @@ export async function getUserPonds(userId: string): Promise<UserPond[]> {
             initialFishCount: adminPondData.initialFishCount,
             feedingFrequency: adminPondData.feedingFrequency,
             sensorId: adminPondData.sensorId,
+            stockingDate: adminPondData.stockingDate.toDate(),
             createdAt: adminPondData.createdAt.toDate(),
             updatedAt: adminPondData.updatedAt.toDate(),
           }
