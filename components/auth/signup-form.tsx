@@ -103,7 +103,7 @@ export function SignUpForm({ onSignInClick }: SignUpFormProps) {
           id="studentId"
           type="text"
           inputMode="numeric"
-          placeholder="e.g. 2023-12345"
+          placeholder="e.g. 22-12345"
           value={studentId}
           onChange={(e) => setStudentId(e.target.value)}
           required

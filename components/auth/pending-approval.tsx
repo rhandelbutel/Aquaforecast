@@ -1,3 +1,4 @@
+// components/auth/pending-approval.tsx (or your current path)
 "use client"
 
 import { useState, useEffect } from "react"
@@ -16,6 +17,7 @@ import {
   Mail,
   Calendar,
   ShieldBan,
+  IdCard, // 👈 NEW: lucide-react id card icon
 } from "lucide-react"
 
 type ApprovalState = "pending" | "approved" | "rejected" | "blocked"
@@ -171,9 +173,21 @@ export function PendingApproval() {
                   {approvalStatus}
                 </Badge>
               </div>
+
               <div className="flex items-center gap-2 text-sm text-gray-600">
                 <Mail className="h-4 w-4" />
                 <span>{userProfile.email}</span>
+              </div>
+
+              {/* 👇 NEW: Student ID row (shown for all states) */}
+              <div className="flex items-center gap-2 text-sm text-gray-700">
+                <IdCard className="h-4 w-4" />
+                <span>
+                  <span className="font-medium">Student ID:</span>{" "}
+                  {userProfile.studentId && String(userProfile.studentId).trim() !== ""
+                    ? userProfile.studentId
+                    : "—"}
+                </span>
               </div>
 
               {approvalStatus === "blocked" ? (
@@ -214,7 +228,6 @@ export function PendingApproval() {
               </p>
             )}
           </div>
-          
 
           {/* Action Buttons */}
           <div className="space-y-3">
@@ -238,9 +251,9 @@ export function PendingApproval() {
                 )}
               </Button>
             )}
+
             {approvalStatus === "blocked" ? (
-                // ONLY show Date blocked when account is blocked
-                <div className="text-center text-sm text-gray-500 space-y-3">
+              <div className="text-center text-sm text-gray-500 space-y-3">
                 <Button
                   onClick={handleSignOut}
                   variant="outline"
@@ -252,16 +265,12 @@ export function PendingApproval() {
 
                 <div className="pt-4 space-y-1">
                   <p>Need help? Contact support at</p>
-
-                  {/* Works in browsers AND native apps (opens default mail app / Gmail) */}
                   <a
                     href="mailto:aquaforecast.care@gmail.com?subject=Account%20blocked%20support"
                     className="font-medium text-blue-600 underline italic"
                   >
                     aquaforecast.care@gmail.com
                   </a>
-
-                  {/* Web-only fallback to Gmail Web compose */}
                   <div>
                     <a
                       href="https://mail.google.com/mail/?view=cm&fs=1&to=aquaforecast.care@gmail.com&su=Account%20blocked%20support"
@@ -274,43 +283,40 @@ export function PendingApproval() {
                   </div>
                 </div>
               </div>
-                
-              ) : (
-            <Button
-              onClick={handleSignOut}
-              variant="outline"
-              className="w-full text-red-600 border-red-200 hover:bg-red-50 bg-transparent"
-            >
-              <LogOut className="h-4 w-4 mr-2" />
-              Sign Out
-            </Button>)}
+            ) : (
+              <Button
+                onClick={handleSignOut}
+                variant="outline"
+                className="w-full text-red-600 border-red-200 hover:bg-red-50 bg-transparent"
+              >
+                <LogOut className="h-4 w-4 mr-2" />
+                Sign Out
+              </Button>
+            )}
           </div>
 
           {approvalStatus === "pending" && (
             <div className="text-center text-sm text-gray-500 space-y-3">
-                <div className="pt-4 space-y-1">
-                  <p>Need help? Contact support at</p>
-                  {/* Works in browsers AND native apps (opens default mail app / Gmail) */}
+              <div className="pt-4 space-y-1">
+                <p>Need help? Contact support at</p>
+                <a
+                  href="mailto:aquaforecast.care@gmail.com?subject=Account%20application%20support"
+                  className="font-medium text-blue-600 underline italic"
+                >
+                  aquaforecast.care@gmail.com
+                </a>
+                <div>
                   <a
-                    href="mailto:aquaforecast.care@gmail.com?subject=Account%20application%20support"
-                    className="font-medium text-blue-600 underline italic"
+                    href="https://mail.google.com/mail/?view=cm&fs=1&to=aquaforecast.care@gmail.com&su=Account%20application%20support"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline italic text-blue-600"
                   >
-                    aquaforecast.care@gmail.com
+                    Open in Gmail (web)
                   </a>
-
-                  {/* Web-only fallback to Gmail Web compose */}
-                  <div>
-                    <a
-                      href="https://mail.google.com/mail/?view=cm&fs=1&to=aquaforecast.care@gmail.com&su=Account%20application%20support"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline italic text-blue-600"
-                    >
-                      Open in Gmail (web)
-                    </a>
-                  </div>
                 </div>
               </div>
+            </div>
           )}
         </CardContent>
       </Card>

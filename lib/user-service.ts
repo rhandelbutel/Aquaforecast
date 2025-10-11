@@ -16,23 +16,24 @@ import { db } from "./firebase"
 
 // ---------- Types ----------
 export interface UserProfile {
-  role: "admin" | "user";           // tighter typing (was: any)
-  uid: string
-  email: string
-  displayName: string
-  fullName?: string
-  phone?: string
-  status: "pending" | "approved" | "rejected" | "blocked"
-  createdAt: Date
-  approvedAt?: Date
-  approvedBy?: string
-  rejectedAt?: Date
-  rejectedBy?: string
-  blockedAt?: Date
-  blockedBy?: string
-  blockReason?: string | null
-  studentId?: string
+  role: "admin" | "user";
+  uid: string;
+  email: string;
+  displayName: string;
+  fullName?: string;
+  phone?: string;
+  status: "pending" | "approved" | "rejected" | "blocked";
+  createdAt?: Date | undefined;
+  approvedAt?: Date | undefined;
+  approvedBy?: string;
+  rejectedAt?: Date | undefined;
+  rejectedBy?: string;
+  blockedAt?: Date | undefined;
+  blockedBy?: string;
+  blockReason?: string;
+  studentId?: string;
 }
+
 
 export interface PondPreferences {
   userId: string

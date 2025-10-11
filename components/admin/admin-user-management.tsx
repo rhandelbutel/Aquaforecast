@@ -1,177 +1,251 @@
-"use client"
+// components/admin/admin-user-management.tsx
+"use client";
 
-import { useState, useEffect } from "react"
-import { useAuth } from "@/lib/auth-context"
+import { useEffect, useState } from "react";
+import { useAuth } from "@/lib/auth-context";
 import {
-  getAllUsers,
-  getPendingUsers,
-  getApprovedUsers,
-  getRejectedUsers,
-  getBlockedUsers,   // NEW
   approveUser,
   rejectUser,
-  blockUser,         // NEW
-  unblockUser,       // NEW
+  blockUser,
+  unblockUser,
   type UserProfile,
-} from "@/lib/user-service"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+} from "@/lib/user-service";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Users, Clock, CheckCircle, XCircle, UserCheck, UserX, RefreshCw, Calendar, Mail, ShieldBan, RotateCcw
-} from "lucide-react"
-import { useToast } from "@/hooks/use-toast"
+  Users,
+  Clock,
+  CheckCircle,
+  XCircle,
+  UserCheck,
+  UserX,
+  RefreshCw,
+  Calendar,
+  Mail,
+  ShieldBan,
+  RotateCcw,
+} from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { db } from "@/lib/firebase";
+import { collection, onSnapshot, QueryDocumentSnapshot, Timestamp } from "firebase/firestore";
 
-interface UserStats {
-  total: number
-  pending: number
-  approved: number
-  rejected: number
-  blocked: number // NEW
-}
+// ---------- Types ----------
+type AdminUser = Omit<
+  UserProfile,
+  | "createdAt"
+  | "approvedAt"
+  | "rejectedAt"
+  | "blockedAt"
+  | "approvedBy"
+  | "rejectedBy"
+  | "blockedBy"
+  | "studentId"
+> & {
+  createdAt?: Date;        // allow undefined (matches Firestore reads)
+  approvedAt?: Date;
+  rejectedAt?: Date;
+  blockedAt?: Date;
+  approvedBy?: string | null;
+  rejectedBy?: string | null;
+  blockedBy?: string | null;
+  studentId?: string | null;
+};
 
+type UserStats = {
+  total: number;
+  pending: number;
+  approved: number;
+  rejected: number;
+  blocked: number;
+};
+
+// ---------- Helpers ----------
+const toDate = (v: any): Date | undefined => {
+  if (!v) return undefined;
+  return v instanceof Date ? v : (v as Timestamp)?.toDate?.() ?? undefined;
+};
+
+const fromDoc = (doc: QueryDocumentSnapshot): AdminUser => {
+  const d = doc.data() as any;
+  return {
+    uid: doc.id,
+    email: d.email,
+    displayName: d.displayName,
+    role: d.role,
+    status: d.status, // "pending" | "approved" | "rejected" | "blocked"
+    createdAt: toDate(d.createdAt),
+    approvedAt: toDate(d.approvedAt),
+    approvedBy: d.approvedBy ?? null,
+    rejectedAt: toDate(d.rejectedAt),
+    rejectedBy: d.rejectedBy ?? null,
+    blockedAt: toDate(d.blockedAt),
+    blockedBy: d.blockedBy ?? null,
+    studentId: d.studentId ?? d.studentID ?? d.sid ?? null,
+    fullName: d.fullName,
+    phone: d.phone,
+    blockReason: d.blockReason ?? null,
+  };
+};
+
+const formatDate = (date?: Date) => {
+  if (!date) return "—";
+  return date.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+// ---------- Component ----------
 export function AdminUserManagement() {
-  const { user } = useAuth()
-  const { toast } = useToast()
-  const [stats, setStats] = useState<UserStats>({ total: 0, pending: 0, approved: 0, rejected: 0, blocked: 0 })
-  const [allUsers, setAllUsers] = useState<UserProfile[]>([])
-  const [pendingUsers, setPendingUsers] = useState<UserProfile[]>([])
-  const [approvedUsers, setApprovedUsers] = useState<UserProfile[]>([])
-  const [rejectedUsers, setRejectedUsers] = useState<UserProfile[]>([])
-  const [blockedUsers, setBlockedUsers] = useState<UserProfile[]>([]) // NEW
-  const [loading, setLoading] = useState(true)
-  const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const { user } = useAuth();
+  const { toast } = useToast();
+
+  const [stats, setStats] = useState<UserStats>({
+    total: 0,
+    pending: 0,
+    approved: 0,
+    rejected: 0,
+    blocked: 0,
+  });
+
+  const [allUsers, setAllUsers] = useState<AdminUser[]>([]);
+  const [pendingUsers, setPendingUsers] = useState<AdminUser[]>([]);
+  const [approvedUsers, setApprovedUsers] = useState<AdminUser[]>([]);
+  const [rejectedUsers, setRejectedUsers] = useState<AdminUser[]>([]);
+  const [blockedUsers, setBlockedUsers] = useState<AdminUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState<{
-    show: boolean
-    action: "approve" | "reject" | "block" | "unblock"
-    user: UserProfile | null
-  }>({ show: false, action: "approve", user: null })
+    show: boolean;
+    action: "approve" | "reject" | "block" | "unblock";
+    user: AdminUser | null;
+  }>({ show: false, action: "approve", user: null });
 
-  const loadStats = async () => {
-    try {
-      const [all, pending, approved, rejected, blocked] = await Promise.all([
-        getAllUsers(),
-        getPendingUsers(),
-        getApprovedUsers(),
-        getRejectedUsers(),
-        getBlockedUsers(), // NEW
-      ])
-
-      setAllUsers(all)
-      setPendingUsers(pending)
-      setApprovedUsers(approved)
-      setRejectedUsers(rejected)
-      setBlockedUsers(blocked)
-
-      setStats({
-        total: all.length,
-        pending: pending.length,
-        approved: approved.length,
-        rejected: rejected.length,
-        blocked: blocked.length,
-      })
-    } catch (error) {
-      console.error("Error loading user stats:", error)
-      toast({
-        title: "Error",
-        description: "Failed to load user statistics",
-        variant: "destructive",
-      })
-    } finally {
-      setLoading(false)
-    }
-  }
-
+  // Real-time subscription
   useEffect(() => {
-    loadStats()
-  }, [])
+    const usersRef = collection(db, "users");
+    const unsub = onSnapshot(
+      usersRef,
+      (snap) => {
+        const all = snap.docs.map(fromDoc);
 
-  const handleApprove = async (userProfile: UserProfile) => {
-    if (!user?.email) return
-    setActionLoading(userProfile.uid)
-    try {
-      await approveUser(userProfile.uid, user.email)
-      await loadStats()
-      toast({ title: "User Approved", description: `${userProfile.email} has been approved successfully.` })
-    } catch (error) {
-      console.error("Error approving user:", error)
-      toast({ title: "Error", description: "Failed to approve user", variant: "destructive" })
-    } finally {
-      setActionLoading(null)
-      setShowConfirmModal({ show: false, action: "approve", user: null })
-    }
-  }
+        const pending = all.filter((u) => u.status === "pending");
+        const approved = all.filter((u) => u.status === "approved");
+        const rejected = all.filter((u) => u.status === "rejected");
+        const blocked = all.filter((u) => u.status === "blocked");
 
-  const handleReject = async (userProfile: UserProfile) => {
-    if (!user?.email) return
-    setActionLoading(userProfile.uid)
-    try {
-      await rejectUser(userProfile.uid, user.email)
-      await loadStats()
-      toast({ title: "User Rejected", description: `${userProfile.email} has been rejected.` })
-    } catch (error) {
-      console.error("Error rejecting user:", error)
-      toast({ title: "Error", description: "Failed to reject user", variant: "destructive" })
-    } finally {
-      setActionLoading(null)
-      setShowConfirmModal({ show: false, action: "reject", user: null })
-    }
-  }
+        setAllUsers(all);
+        setPendingUsers(pending);
+        setApprovedUsers(approved);
+        setRejectedUsers(rejected);
+        setBlockedUsers(blocked);
 
-  const handleBlock = async (userProfile: UserProfile) => {
-    if (!user?.email) return
-    setActionLoading(userProfile.uid)
-    try {
-      await blockUser(userProfile.uid, user.email, "Policy violation")
-      await loadStats()
-      toast({ title: "User Blocked", description: `${userProfile.email} has been blocked.` })
-    } catch (error) {
-      console.error("Error blocking user:", error)
-      toast({ title: "Error", description: "Failed to block user", variant: "destructive" })
-    } finally {
-      setActionLoading(null)
-      setShowConfirmModal({ show: false, action: "block", user: null })
-    }
-  }
+        setStats({
+          total: all.length,
+          pending: pending.length,
+          approved: approved.length,
+          rejected: rejected.length,
+          blocked: blocked.length,
+        });
 
-  const handleUnblock = async (userProfile: UserProfile) => {
-    if (!user?.email) return
-    setActionLoading(userProfile.uid)
+        setLoading(false);
+      },
+      (err) => {
+        console.error("users onSnapshot error:", err);
+        toast({
+          title: "Error",
+          description: "Failed to subscribe to user changes.",
+          variant: "destructive",
+        });
+        setLoading(false);
+      }
+    );
+
+    return () => unsub();
+  }, [toast]);
+
+  // Actions
+  const handleApprove = async (userProfile: AdminUser) => {
+    if (!user?.email) return;
+    setActionLoading(userProfile.uid);
     try {
-      await unblockUser(userProfile.uid, user.email)
-      await loadStats()
-      toast({ title: "User Unblocked", description: `${userProfile.email} has been unblocked.` })
+      await approveUser(userProfile.uid, user.email);
+      toast({ title: "User Approved", description: `${userProfile.email} has been approved.` });
     } catch (error) {
-      console.error("Error unblocking user:", error)
-      toast({ title: "Error", description: "Failed to unblock user", variant: "destructive" })
+      console.error("Error approving user:", error);
+      toast({ title: "Error", description: "Failed to approve user", variant: "destructive" });
     } finally {
-      setActionLoading(null)
-      setShowConfirmModal({ show: false, action: "unblock", user: null })
+      setActionLoading(null);
+      setShowConfirmModal({ show: false, action: "approve", user: null });
     }
-  }
+  };
+
+  const handleReject = async (userProfile: AdminUser) => {
+    if (!user?.email) return;
+    setActionLoading(userProfile.uid);
+    try {
+      await rejectUser(userProfile.uid, user.email);
+      toast({ title: "User Rejected", description: `${userProfile.email} has been rejected.` });
+    } catch (error) {
+      console.error("Error rejecting user:", error);
+      toast({ title: "Error", description: "Failed to reject user", variant: "destructive" });
+    } finally {
+      setActionLoading(null);
+      setShowConfirmModal({ show: false, action: "reject", user: null });
+    }
+  };
+
+  const handleBlock = async (userProfile: AdminUser) => {
+    if (!user?.email) return;
+    setActionLoading(userProfile.uid);
+    try {
+      await blockUser(userProfile.uid, user.email, "Policy violation");
+      toast({ title: "User Blocked", description: `${userProfile.email} has been blocked.` });
+    } catch (error) {
+      console.error("Error blocking user:", error);
+      toast({ title: "Error", description: "Failed to block user", variant: "destructive" });
+    } finally {
+      setActionLoading(null);
+      setShowConfirmModal({ show: false, action: "block", user: null });
+    }
+  };
+
+  const handleUnblock = async (userProfile: AdminUser) => {
+    if (!user?.email) return;
+    setActionLoading(userProfile.uid);
+    try {
+      await unblockUser(userProfile.uid, user.email);
+      toast({ title: "User Unblocked", description: `${userProfile.email} has been unblocked.` });
+    } catch (error) {
+      console.error("Error unblocking user:", error);
+      toast({ title: "Error", description: "Failed to unblock user", variant: "destructive" });
+    } finally {
+      setActionLoading(null);
+      setShowConfirmModal({ show: false, action: "unblock", user: null });
+    }
+  };
 
   const confirmAction = () => {
-    if (!showConfirmModal.user) return
-    const u = showConfirmModal.user
-    if (showConfirmModal.action === "approve") return handleApprove(u)
-    if (showConfirmModal.action === "reject")  return handleReject(u)
-    if (showConfirmModal.action === "block")   return handleBlock(u)
-    if (showConfirmModal.action === "unblock") return handleUnblock(u)
-  }
+    if (!showConfirmModal.user) return;
+    const u = showConfirmModal.user;
+    if (showConfirmModal.action === "approve") return handleApprove(u);
+    if (showConfirmModal.action === "reject") return handleReject(u);
+    if (showConfirmModal.action === "block") return handleBlock(u);
+    if (showConfirmModal.action === "unblock") return handleUnblock(u);
+  };
 
-  const formatDate = (date: Date | undefined) => {
-    if (!date) return "N/A"
-    return date.toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    })
-  }
-
-  const UserCard = ({ userProfile, showActions = true }: { userProfile: UserProfile; showActions?: boolean }) => (
+  const UserCard = ({
+    userProfile,
+    showActions = true,
+  }: {
+    userProfile: AdminUser;
+    showActions?: boolean;
+  }) => (
     <Card className="mb-4">
       <CardContent className="p-4">
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
@@ -196,6 +270,15 @@ export function AdminUserManagement() {
                 {userProfile.status}
               </Badge>
             </div>
+
+            {/* Student ID */}
+            <div className="text-xs sm:text-sm text-gray-700 mb-2">
+              <span className="font-medium">Student ID:</span>{" "}
+              {userProfile.studentId && String(userProfile.studentId).trim() !== ""
+                ? userProfile.studentId
+                : "—"}
+            </div>
+
             <div className="text-xs sm:text-sm text-gray-600 space-y-1 break-words">
               <div className="flex items-center gap-2">
                 <Calendar className="h-3 w-3" />
@@ -217,12 +300,11 @@ export function AdminUserManagement() {
                   </span>
                 </div>
               )}
-              {/* Block info */}
-              {(userProfile as any).blockedAt && (
+              {userProfile.blockedAt && (
                 <div className="flex items-center gap-2">
                   <ShieldBan className="h-3 w-3 text-red-600" />
                   <span className="break-words">
-                    Blocked: {formatDate((userProfile as any).blockedAt)} by {(userProfile as any).blockedBy}
+                    Blocked: {formatDate(userProfile.blockedAt)} by {userProfile.blockedBy}
                   </span>
                 </div>
               )}
@@ -306,19 +388,19 @@ export function AdminUserManagement() {
         </div>
       </CardContent>
     </Card>
-  )
+  );
 
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
         <RefreshCw className="h-8 w-8 animate-spin text-gray-400" />
       </div>
-    )
+    );
   }
 
   return (
     <div className="space-y-6">
-      {/* Stats Cards */}
+      {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
         <Card>
           <CardContent className="p-4">
@@ -381,7 +463,7 @@ export function AdminUserManagement() {
         </Card>
       </div>
 
-      {/* User Management Tabs */}
+      {/* Tabs */}
       <Card>
         <CardHeader>
           <CardTitle>User Management</CardTitle>
@@ -389,11 +471,21 @@ export function AdminUserManagement() {
         <CardContent>
           <Tabs defaultValue="pending" className="w-full">
             <TabsList className="grid w-full grid-cols-2 sm:grid-cols-5 sm:w-auto">
-              <TabsTrigger value="pending"  className="text-xs sm:text-sm px-2 sm:px-3">Pending ({stats.pending})</TabsTrigger>
-              <TabsTrigger value="approved" className="text-xs sm:text-sm px-2 sm:px-3">Approved ({stats.approved})</TabsTrigger>
-              <TabsTrigger value="blocked"  className="text-xs sm:text-sm px-2 sm:px-3">Blocked ({stats.blocked})</TabsTrigger>
-              <TabsTrigger value="rejected" className="text-xs sm:text-sm px-2 sm:px-3">Rejected ({stats.rejected})</TabsTrigger>
-              <TabsTrigger value="all"      className="text-xs sm:text-sm px-2 sm:px-3">All ({stats.total})</TabsTrigger>
+              <TabsTrigger value="pending" className="text-xs sm:text-sm px-2 sm:px-3">
+                Pending ({stats.pending})
+              </TabsTrigger>
+              <TabsTrigger value="approved" className="text-xs sm:text-sm px-2 sm:px-3">
+                Approved ({stats.approved})
+              </TabsTrigger>
+              <TabsTrigger value="blocked" className="text-xs sm:text-sm px-2 sm:px-3">
+                Blocked ({stats.blocked})
+              </TabsTrigger>
+              <TabsTrigger value="rejected" className="text-xs sm:text-sm px-2 sm:px-3">
+                Rejected ({stats.rejected})
+              </TabsTrigger>
+              <TabsTrigger value="all" className="text-xs sm:text-sm px-2 sm:px-3">
+                All ({stats.total})
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value="pending" className="mt-6">
@@ -481,8 +573,8 @@ export function AdminUserManagement() {
             <CardHeader>
               <CardTitle>
                 {showConfirmModal.action === "approve" && "Approve User"}
-                {showConfirmModal.action === "reject"  && "Reject User"}
-                {showConfirmModal.action === "block"   && "Block User"}
+                {showConfirmModal.action === "reject" && "Reject User"}
+                {showConfirmModal.action === "block" && "Block User"}
                 {showConfirmModal.action === "unblock" && "Unblock User"}
               </CardTitle>
             </CardHeader>
@@ -518,5 +610,5 @@ export function AdminUserManagement() {
         </div>
       )}
     </div>
-  )
+  );
 }
