@@ -1,7 +1,8 @@
+// components/feeding/feeding-log-modal.tsx
 "use client"
 
 import type React from "react"
-import { useState, useEffect, useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,27 +10,24 @@ import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { X, Clock, Calendar, Lightbulb } from "lucide-react"
+
 import { useAuth } from "@/lib/auth-context"
 import { usePonds } from "@/lib/pond-context"
-import { addFeedingLog, getFeedingLogsByPond } from "@/lib/feeding-service"
-import { feedingScheduleService } from "@/lib/feeding-schedule-service"
+import { addFeedingLog, subscribeFeedingLogs, type FeedingLog } from "@/lib/feeding-service"
+import { feedingScheduleService, type FeedingSchedule } from "@/lib/feeding-schedule-service"
 import { GrowthService } from "@/lib/growth-service"
 import { getMortalityLogs, computeSurvivalRateFromLogs } from "@/lib/mortality-service"
 
-/** ---- Local time helpers (Asia/Manila) ---- */
+/* ---- Time helpers (Asia/Manila) ---- */
 const TZ = "Asia/Manila"
-const fmtDatePH = (d: Date) =>
-  new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(d)
+const fmtDatePH = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(d) // YYYY-MM-DD
 const fmtTimePH = (d: Date) =>
-  new Intl.DateTimeFormat("en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit", hour12: false }).format(d)
+  new Intl.DateTimeFormat("en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit", hour12: false }).format(d) // HH:mm
 const toUTCFromPH = (dateStr: string, timeStr: string) => {
   const [y, m, d] = dateStr.split("-").map(Number)
   const [hh, mm] = timeStr.split(":").map(Number)
-  // Manila is UTC+8: subtract 8 hours to persist as UTC
   return new Date(Date.UTC(y, (m || 1) - 1, d || 1, (hh || 0) - 8, mm || 0))
 }
-
-/** Compute today’s YYYY-MM-DD and HH:mm in PH */
 const nowStringsPH = () => {
   const now = new Date()
   return { date: fmtDatePH(now), time: fmtTimePH(now) }
@@ -47,183 +45,150 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
   const selectedPond = ponds[0]
   const sharedPondId = (selectedPond as any)?.adminPondId || selectedPond?.id
 
-  // UI state
+  // ui
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
 
-  // confirm dialog
-  const [confirmOpen, setConfirmOpen] = useState(false)
-  const [pendingSubmit, setPendingSubmit] = useState<null | {
-    fedAt: Date
-    grams: number
-  }>(null)
+  // dialogs
+  const [missedOpen, setMissedOpen] = useState(false)
+  const [confirmEarlyOpen, setConfirmEarlyOpen] = useState(false)
+  const [confirmAmountOpen, setConfirmAmountOpen] = useState(false)
+  const [pendingEarly, setPendingEarly] = useState<{ fedAt: Date; grams: number } | null>(null)
+  const [pendingAmount, setPendingAmount] = useState<{ fedAt: Date; grams: number } | null>(null)
 
-  // form (only 'g' unit now)
+  // form
   const { date: currentDate, time: currentTime } = nowStringsPH()
-  const [formData, setFormData] = useState({
-    date: currentDate,
-    time: currentTime,
-    feedGiven: "", // grams
-  })
+  const [formData, setFormData] = useState({ date: currentDate, time: currentTime, feedGiven: "" })
+
+  // schedule + logs (live)
+  const [schedule, setSchedule] = useState<FeedingSchedule | null>(null)
+  const [logs, setLogs] = useState<FeedingLog[]>([])
+  const unsubRef = useRef<null | (() => void)>(null)
 
   // suggestions
   const [abw, setAbw] = useState<number | null>(null)
   const [estimatedAlive, setEstimatedAlive] = useState<number | null>(null)
   const feedingFrequency = selectedPond?.feedingFrequency ?? 0
 
-  const recommendedRateFromABW = (v?: number | null): number | null => {
-    if (v == null || !Number.isFinite(v)) return null
-    if (v < 2) return 20
-    if (v < 15) return 10
-    if (v < 100) return 5
-    return 2.75
-  }
-  const recommendedRate = useMemo(() => recommendedRateFromABW(abw), [abw])
-
+  const rateFromABW = (v?: number | null): number | null =>
+    v == null ? null : v < 2 ? 20 : v < 15 ? 10 : v < 100 ? 5 : 2.75
+  const rate = useMemo(() => rateFromABW(abw), [abw])
   const dailyFeedKg = useMemo(() => {
-    if (!abw || !estimatedAlive || !recommendedRate || feedingFrequency <= 0) return null
+    if (!abw || !estimatedAlive || !rate || feedingFrequency <= 0) return null
     const biomassKg = (abw * estimatedAlive) / 1000
-    return biomassKg * (recommendedRate / 100)
-  }, [abw, estimatedAlive, recommendedRate, feedingFrequency])
+    return biomassKg * (rate / 100)
+  }, [abw, estimatedAlive, rate, feedingFrequency])
+  const perFeedingGrams = useMemo(() => (dailyFeedKg ? Math.round((dailyFeedKg / feedingFrequency) * 1000) : null), [
+    dailyFeedKg,
+    feedingFrequency,
+  ])
 
-  const perFeedingGrams = useMemo(() => {
-    if (!dailyFeedKg || feedingFrequency <= 0) return null
-    return Math.round((dailyFeedKg / feedingFrequency) * 1000) // g
-  }, [dailyFeedKg, feedingFrequency])
-
-  /** reset form time on open */
+  /* reset when open */
   useEffect(() => {
     if (!isOpen) return
     const { date, time } = nowStringsPH()
-    setFormData((p) => ({ ...p, date, time }))
+    setFormData({ date, time, feedGiven: "" })
+    setError("")
+    setSuccess("")
   }, [isOpen])
 
-  /** load ABW + survival → suggestion inputs */
+  /* load schedule + subscribe logs LIVE */
+  useEffect(() => {
+    if (!isOpen || !sharedPondId) return
+    let cancelled = false
+
+    ;(async () => {
+      const s = await feedingScheduleService.getByPondId(sharedPondId)
+      if (!cancelled) setSchedule(s)
+    })()
+
+    // live logs
+    unsubRef.current?.()
+    unsubRef.current = subscribeFeedingLogs(sharedPondId, (arr) => setLogs(arr))
+
+    return () => {
+      cancelled = true
+      unsubRef.current?.()
+      unsubRef.current = null
+    }
+  }, [isOpen, sharedPondId])
+
+  /* suggestions sources */
   useEffect(() => {
     if (!isOpen || !user || !sharedPondId || !selectedPond) return
     ;(async () => {
       try {
         const setup = await GrowthService.getGrowthSetup(sharedPondId, user.uid)
         setAbw(setup?.currentABW ?? null)
-
-        const logs = await getMortalityLogs(sharedPondId)
-        const sr = computeSurvivalRateFromLogs(logs)
+        const m = await getMortalityLogs(sharedPondId)
+        const sr = computeSurvivalRateFromLogs(m)
         const initial = selectedPond.fishCount || 0
-        const alive = Math.max(0, Math.round((sr / 100) * initial))
-        setEstimatedAlive(alive)
+        setEstimatedAlive(Math.max(0, Math.round((sr / 100) * initial)))
       } catch (e) {
-        console.error("Suggestion sources error:", e)
+        console.error(e)
       }
     })()
   }, [isOpen, user, sharedPondId, selectedPond])
 
-  /** ====== MISSED/EXCEEDED AUTO-LOGIC (no 3h grace; runs once per open) ====== */
-  const autoLoggedRef = useRef(false)
+  /* build today's slots */
+  const makePHDate = (base: Date, hhmm: string) => {
+    const [hh, mm] = hhmm.split(":").map(Number)
+    return toUTCFromPH(fmtDatePH(base), `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`)
+  }
+  const todaySlotsUTC = useMemo(() => {
+    if (!schedule) return []
+    const today = new Date()
+    return schedule.feedingTimes.map((t) => makePHDate(today, t)).sort((a, b) => a.getTime() - b.getTime())
+  }, [schedule])
+
+  const isLoggedNear = (slot: Date, nearMs = 90 * 60 * 1000) =>
+    logs.some((l) => Math.abs(new Date(l.fedAt).getTime() - slot.getTime()) <= nearMs)
+
+  const missedSlots = useMemo(() => {
+    if (!schedule) return []
+    const now = new Date()
+    return todaySlotsUTC.filter((s) => s.getTime() < now.getTime() && !isLoggedNear(s))
+  }, [todaySlotsUTC, schedule, logs])
+
+  const nextSlot = useMemo<Date | null>(() => {
+    const now = new Date()
+    return todaySlotsUTC.find((s) => s.getTime() >= now.getTime()) ?? null
+  }, [todaySlotsUTC])
+
+  /* OPEN MISSED POPUP when data becomes ready */
+  const dataReady = !!schedule && isOpen
+  const shownMissedOnce = useRef(false)
   useEffect(() => {
-    if (!isOpen || !user || !sharedPondId || autoLoggedRef.current === true) return
-    ;(async () => {
-      try {
-        const sched = await feedingScheduleService.getByPondId(sharedPondId)
-        if (!sched || sched.isActive === false) return
+    if (!dataReady) return
+    if (missedSlots.length > 0 && !shownMissedOnce.current) {
+      setMissedOpen(true)
+      shownMissedOnce.current = true
+    }
+  }, [dataReady, missedSlots.length])
 
-        // Build schedule times for yesterday & today (PH local)
-        const slotsUTC: Date[] = []
-        const today = new Date()
-        const makePHDate = (d: Date, hhmm: string) => {
-          const [hh, mm] = hhmm.split(":").map(Number)
-          return toUTCFromPH(fmtDatePH(d), `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`)
-        }
-        const yest = new Date(today); yest.setDate(yest.getDate() - 1)
-
-        for (const t of sched.feedingTimes) {
-          slotsUTC.push(makePHDate(yest, t))
-          slotsUTC.push(makePHDate(today, t))
-        }
-
-        // Fetch all logs for quick matching
-        const allLogs = await getFeedingLogsByPond(sharedPondId)
-
-        // Criteria:
-        // - slot time is already in the past (exceeded)
-        // - AND there is NO log within ±90 minutes from that slot
-        const now = new Date()
-        const NEAR_MS = 90 * 60 * 1000
-
-        const missed = slotsUTC
-          .filter((slot) => slot.getTime() <= now.getTime())
-          .sort((a, b) => b.getTime() - a.getTime())
-          .find((slot) => {
-            const near = allLogs.find(
-              (l) => Math.abs(new Date(l.fedAt).getTime() - slot.getTime()) <= NEAR_MS
-            )
-            return !near
-          })
-
-        if (!missed) return
-        if (perFeedingGrams == null) return // cannot auto-log without suggestion
-
-        await addFeedingLog({
-          pondId: sharedPondId!,
-          adminPondId: sharedPondId!,
-          pondName: selectedPond?.name || "Pond",
-          userId: user.uid,
-          userDisplayName: user.displayName || undefined,
-          userEmail: user.email || undefined,
-          fedAt: missed,                 // log at scheduled slot time
-          scheduledFor: missed,          // keep explicit
-          feedGiven: perFeedingGrams,    // grams
-          feedUnit: "g",
-          autoLogged: true,
-          reason: "missed_schedule",
-        })
-
-        autoLoggedRef.current = true
-        setSuccess(`Auto-logged a missed/exceeded feeding at ${fmtTimePH(new Date(missed))} (PH).`)
-        onSuccess?.()
-      } catch (e) {
-        console.error("auto-log failed:", e)
-      }
-    })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, sharedPondId, user, perFeedingGrams])
-
-  /** input handling */
+  /* form handlers */
   const handleInputChange = (field: "date" | "time" | "feedGiven", value: string) => {
     if (field === "date") {
-      const nextDate = value
-      const isToday = nextDate === currentDate
+      const isToday = value === currentDate
       const nextTime = isToday && formData.time > currentTime ? currentTime : formData.time
-      setFormData((prev) => ({ ...prev, date: nextDate, time: nextTime }))
+      setFormData((p) => ({ ...p, date: value, time: nextTime }))
       return
     }
     if (field === "time") {
       const isToday = formData.date === currentDate
       const capped = isToday && value > currentTime ? currentTime : value
-      setFormData((prev) => ({ ...prev, time: capped }))
+      setFormData((p) => ({ ...p, time: capped }))
       return
     }
-    setFormData((prev) => ({ ...prev, [field]: value }))
+    setFormData((p) => ({ ...p, [field]: value }))
   }
+  const applySuggestion = () => perFeedingGrams != null && setFormData((p) => ({ ...p, feedGiven: String(perFeedingGrams) }))
 
-  const validatePast = () => {
-    const when = toUTCFromPH(formData.date, formData.time)
-    if (when > new Date()) {
-      setError("Cannot log feeding for future date/time")
-      return false
-    }
-    return true
-  }
-
-  const beginSubmit = (fedAt: Date, grams: number) => {
-    // If user input differs from suggestion → confirm
-    if (perFeedingGrams != null && grams !== perFeedingGrams) {
-      setPendingSubmit({ fedAt, grams })
-      setConfirmOpen(true)
-      return
-    }
-    // Otherwise proceed
-    void doSubmit(fedAt, grams)
+  /* guards + submit */
+  const countTodayLogs = () => {
+    const todayStr = fmtDatePH(new Date())
+    return logs.filter((l) => fmtDatePH(new Date(l.fedAt)) === todayStr).length
   }
 
   const doSubmit = async (fedAt: Date, grams: number) => {
@@ -231,11 +196,10 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
     setLoading(true)
     setError("")
     setSuccess("")
-
     try {
       await addFeedingLog({
-        pondId: sharedPondId!,
-        adminPondId: sharedPondId!,
+        pondId: sharedPondId,
+        adminPondId: sharedPondId,
         pondName: selectedPond.name,
         userId: user.uid,
         userDisplayName: user.displayName || undefined,
@@ -246,7 +210,6 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
         autoLogged: false,
         reason: "manual",
       })
-
       setSuccess("Feeding logged successfully!")
       setTimeout(() => {
         onSuccess?.()
@@ -254,43 +217,51 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
         const { date, time } = nowStringsPH()
         setFormData({ date, time, feedGiven: "" })
         setSuccess("")
-      }, 900)
-    } catch (err) {
-      console.error("addFeedingLog failed:", err)
-      setError("Failed to log feeding. Please try again.")
+      }, 700)
+    } catch (e) {
+      console.error(e)
+      setError("Failed to save feeding log.")
     } finally {
       setLoading(false)
     }
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const startSubmitWithGuards = (fedAt: Date, grams: number) => {
+    // cap by pond frequency (PH local day)
+    if (feedingFrequency > 0 && countTodayLogs() >= feedingFrequency) {
+      setError(`Daily limit reached (${feedingFrequency}×/day).`)
+      return
+    }
+
+    // too-early (only if there is a remaining scheduled slot after now)
+    const now = new Date()
+    const early = nextSlot && now < nextSlot && fedAt.getTime() < nextSlot.getTime()
+    if (early) {
+      setPendingEarly({ fedAt, grams })
+      setConfirmEarlyOpen(true)
+      return
+    }
+
+    if (perFeedingGrams != null && grams !== perFeedingGrams) {
+      setPendingAmount({ fedAt, grams })
+      setConfirmAmountOpen(true)
+      return
+    }
+    void doSubmit(fedAt, grams)
+  }
+
+  const handleSubmit: React.FormEventHandler = (e) => {
     e.preventDefault()
-    if (!validatePast()) return
-
-    // Require an explicit value
-    const hasValue = formData.feedGiven.trim().length > 0
-    if (!hasValue) {
-      setError("Please enter 'Feed Given' or click 'Use suggestion'.")
-      return
-    }
-
-    const gramsNum = Number(formData.feedGiven)
-    if (!Number.isFinite(gramsNum) || gramsNum <= 0) {
-      setError("Feed Given must be a positive number of grams.")
-      return
-    }
-
-    const fedAt = toUTCFromPH(formData.date, formData.time)
-    beginSubmit(fedAt, Math.round(gramsNum))
+    const when = toUTCFromPH(formData.date, formData.time)
+    if (when > new Date()) { setError("Cannot log feeding for a future time."); return }
+    if (!formData.feedGiven.trim()) { setError("Please enter 'Feed Given' or click 'Use suggestion'."); return }
+    const grams = Number(formData.feedGiven)
+    if (!Number.isFinite(grams) || grams <= 0) { setError("Feed Given must be a positive number of grams."); return }
+    startSubmitWithGuards(when, Math.round(grams))
   }
 
-  const applySuggestion = () => {
-    if (perFeedingGrams == null) return
-    setFormData((p) => ({ ...p, feedGiven: String(perFeedingGrams) }))
-  }
-
+  /* render */
   if (!isOpen) return null
-
   if (!selectedPond) {
     return (
       <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -319,28 +290,22 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
 
           <CardContent className="pb-6">
             <form onSubmit={handleSubmit} className="space-y-4">
-              {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
-              {success && <Alert className="border-green-200 bg-green-50"><AlertDescription className="text-green-800">{success}</AlertDescription></Alert>}
-
+              {/* Pond */}
               <div className="space-y-2">
                 <Label>Pond</Label>
                 <Input value={selectedPond.name} disabled className="bg-gray-50" />
               </div>
 
+              {/* Date */}
               <div className="space-y-2">
                 <Label>Date</Label>
                 <div className="relative">
-                  <Input
-                    type="date"
-                    value={formData.date}
-                    max={currentDate}
-                    onChange={(e) => handleInputChange("date", e.target.value)}
-                    required
-                  />
+                  <Input type="date" value={formData.date} max={currentDate} onChange={(e) => handleInputChange("date", e.target.value)} required />
                   <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
                 </div>
               </div>
 
+              {/* Time */}
               <div className="space-y-2">
                 <Label>Time</Label>
                 <div className="relative">
@@ -355,44 +320,34 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
-                <div className="col-span-3 space-y-2">
-                  <Label>Feed Given (g)</Label>
-                  <Input
-                    type="number"
-                    step="1"
-                    min="0"
-                    placeholder={perFeedingGrams != null ? String(perFeedingGrams) : "e.g., 150"}
-                    value={formData.feedGiven}
-                    onChange={(e) => handleInputChange("feedGiven", e.target.value)}
-                    required
-                  />
-                </div>
+              {/* Amount */}
+              <div className="space-y-2">
+                <Label>Feed Given (g)</Label>
+                <Input
+                  type="number"
+                  step="1"
+                  min="0"
+                  placeholder={perFeedingGrams != null ? String(perFeedingGrams) : "e.g., 150"}
+                  value={formData.feedGiven}
+                  onChange={(e) => handleInputChange("feedGiven", e.target.value)}
+                  required
+                />
               </div>
 
-              {/* Suggestion panel */}
+              {/* Suggestions */}
               <div className="p-3 rounded-lg bg-blue-50 text-sm">
                 <div className="flex items-start gap-2">
                   <Lightbulb className="h-4 w-4 mt-0.5 text-blue-600" />
                   <div className="flex-1">
-                    <p className="font-medium text-blue-900">Suggested feed (auto-computed)</p>
+                    <p className="font-medium text-blue-900">Suggested feed</p>
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-2">
-                      <div className="text-blue-900/80">Current ABW:</div>
-                      <div className="font-semibold">{abw != null ? `${abw} g` : "—"}</div>
-                      <div className="text-blue-900/80">Estimated fish alive:</div>
-                      <div className="font-semibold">{estimatedAlive != null ? estimatedAlive.toLocaleString() : "—"}</div>
-                      <div className="text-blue-900/80">Feeding rate:</div>
-                      <div className="font-semibold">
-                        {recommendedRate != null ? `${recommendedRate}%` : "—"} <span className="text-xs text-blue-900/60">(rule-of-thumb)</span>
-                      </div>
-                      <div className="text-blue-900/80">Feeding frequency:</div>
-                      <div className="font-semibold">{feedingFrequency || "—"}× / day</div>
-                      <div className="text-blue-900/80">Daily feed:</div>
-                      <div className="font-semibold">{dailyFeedKg != null ? `${dailyFeedKg.toFixed(2)} kg` : "—"}</div>
-                      <div className="text-blue-900/80">Per feeding:</div>
-                      <div className="font-semibold">{perFeedingGrams != null ? `${perFeedingGrams} g` : "—"}</div>
+                      <div className="text-blue-900/80">ABW:</div><div className="font-semibold">{abw ?? "—"} g</div>
+                      <div className="text-blue-900/80">Est. alive:</div><div className="font-semibold">{estimatedAlive?.toLocaleString() ?? "—"}</div>
+                      <div className="text-blue-900/80">Rate:</div><div className="font-semibold">{rate ?? "—"}%</div>
+                      <div className="text-blue-900/80">Freq:</div><div className="font-semibold">{feedingFrequency || "—"}×/day</div>
+                      <div className="text-blue-900/80">Daily:</div><div className="font-semibold">{dailyFeedKg?.toFixed(2) ?? "—"} kg</div>
+                      <div className="text-blue-900/80">Per feeding:</div><div className="font-semibold">{perFeedingGrams ?? "—"} g</div>
                     </div>
-
                     <div className="mt-2">
                       <Button type="button" variant="outline" className="h-8 px-3 bg-white" onClick={applySuggestion} disabled={perFeedingGrams == null}>
                         Use suggestion
@@ -402,10 +357,21 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
                 </div>
               </div>
 
-              <div className="flex gap-3 pt-4">
-                <Button type="button" variant="outline" className="flex-1 bg-transparent" onClick={onClose} disabled={loading}>
-                  Cancel
-                </Button>
+              {/* ---- Alerts moved here (just above buttons) ---- */}
+              {error && (
+                <Alert variant="destructive" className="mt-2">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+              {success && (
+                <Alert className="mt-2 border-green-200 bg-green-50">
+                  <AlertDescription className="text-green-800">{success}</AlertDescription>
+                </Alert>
+              )}
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-2">
+                <Button type="button" variant="outline" className="flex-1 bg-transparent" onClick={onClose} disabled={loading}>Cancel</Button>
                 <Button type="submit" className="flex-1 bg-cyan-600 hover:bg-cyan-700" disabled={loading}>
                   {loading ? "Logging..." : "Log Feeding"}
                 </Button>
@@ -415,34 +381,95 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
         </Card>
       </div>
 
-      {/* Confirm different-from-suggested */}
-      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+      {/* Missed logs chooser */}
+      <Dialog open={missedOpen} onOpenChange={setMissedOpen}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Confirm feeding amount</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>Missed scheduled feedings today</DialogTitle></DialogHeader>
+          {missedSlots.length === 0 ? (
+            <div className="text-sm text-gray-600">No missed schedules for today.</div>
+          ) : (
+            <MissedChooser
+              slots={missedSlots}
+              onPick={(slot) => {
+                setFormData((p) => ({ ...p, date: fmtDatePH(slot), time: fmtTimePH(slot) }))
+                setMissedOpen(false)
+              }}
+            />
+          )}
+          <DialogFooter><Button variant="outline" onClick={() => setMissedOpen(false)}>Close</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Too-early confirmation */}
+      <Dialog open={confirmEarlyOpen} onOpenChange={setConfirmEarlyOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Log earlier than schedule?</DialogTitle></DialogHeader>
           <div className="text-sm">
-            {pendingSubmit && (
-              <>
-                You entered <b>{pendingSubmit.grams} g</b>, but the suggested feed is{" "}
-                <b>{perFeedingGrams ?? "—"} g</b>. Do you want to continue?
-              </>
-            )}
+            {nextSlot ? <>Next scheduled time today is <b>{fmtTimePH(nextSlot)}</b>. Continue?</> : <>Continue?</>}
           </div>
           <DialogFooter className="mt-4">
-            <Button variant="outline" onClick={() => setConfirmOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setConfirmEarlyOpen(false)}>Cancel</Button>
             <Button
               onClick={() => {
-                if (!pendingSubmit) return
-                setConfirmOpen(false)
-                void doSubmit(pendingSubmit.fedAt, pendingSubmit.grams)
+                if (!pendingEarly) return
+                setConfirmEarlyOpen(false)
+                if (perFeedingGrams != null && pendingEarly.grams !== perFeedingGrams) {
+                  setPendingAmount(pendingEarly)
+                  setConfirmAmountOpen(true)
+                } else {
+                  void doSubmit(pendingEarly.fedAt, pendingEarly.grams)
+                }
               }}
             >
+              Yes, log now
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Amount confirmation */}
+      <Dialog open={confirmAmountOpen} onOpenChange={setConfirmAmountOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Confirm feeding amount</DialogTitle></DialogHeader>
+          <div className="text-sm">
+            {pendingAmount && <>You entered <b>{pendingAmount.grams} g</b>, suggestion is <b>{perFeedingGrams ?? "—"} g</b>. Continue?</>}
+          </div>
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => setConfirmAmountOpen(false)}>Cancel</Button>
+            <Button onClick={() => { if (!pendingAmount) return; setConfirmAmountOpen(false); void doSubmit(pendingAmount.fedAt, pendingAmount.grams) }}>
               Confirm
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
+  )
+}
+
+/* Missed chooser */
+function MissedChooser({ slots, onPick }: { slots: Date[]; onPick: (slot: Date) => void }) {
+  const [selected, setSelected] = useState<Date | null>(slots[0] ?? null)
+  useEffect(() => { if (!selected && slots.length) setSelected(slots[0]) }, [slots, selected])
+  return (
+    <div className="space-y-3">
+      <div className="text-sm text-gray-600">Select a missed time to log:</div>
+      <div className="max-h-60 overflow-y-auto border rounded-md">
+        {slots.map((s) => {
+          const key = s.getTime()
+          return (
+            <label key={key} className="flex items-center gap-3 px-3 py-2 border-b last:border-b-0 cursor-pointer">
+              <input type="radio" name="missed" className="accent-cyan-600" checked={selected?.getTime() === key} onChange={() => setSelected(s)} />
+              <div className="text-sm">
+                <div className="font-medium">{fmtTimePH(s)}</div>
+                <div className="text-gray-500">{fmtDatePH(s)}</div>
+              </div>
+            </label>
+          )
+        })}
+      </div>
+      <div className="flex justify-end">
+        <Button onClick={() => selected && onPick(selected)}>Use this time</Button>
+      </div>
+    </div>
   )
 }

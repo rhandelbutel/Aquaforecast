@@ -1,4 +1,3 @@
-// components/feeding/feeding-schedule-modal.tsx
 "use client"
 
 import type React from "react"
@@ -35,16 +34,25 @@ const DAYS_OF_WEEK = [
   { value: 6, label: "Saturday", short: "Sat" },
 ]
 
-// evenly spaced times between 07:00 and 19:00
+/**
+ * Generate evenly spaced times with the **last slot fixed to 17:00 (5 PM)**.
+ * Default span: 07:00 → 17:00.
+ * - If count === 1 → ["17:00"] (since you want the *last* time to be 5pm)
+ */
 const generateTimes = (count: number): string[] => {
-  if (count <= 1) return ["07:00"]
-  const start = 7
-  const end = 19
-  const step = (end - start) / (count - 1)
-  return Array.from({ length: count }, (_, i) => {
-    const h = Math.round(start + i * step)
+  if (count <= 1) return ["17:00"]
+  const startHour = 7
+  const endHour = 17 // ← last slot fixed to 5 PM
+  const step = (endHour - startHour) / (count - 1)
+
+  const times = Array.from({ length: count }, (_, i) => {
+    const h = Math.round(startHour + i * step)
     return `${String(h).padStart(2, "0")}:00`
   })
+
+  // Hard-ensure last is 17:00
+  times[times.length - 1] = "17:00"
+  return times
 }
 
 export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleModalProps) {
@@ -99,7 +107,7 @@ export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleM
         if (sched.timesPerDay === pondFreq) {
           setFeedingTimes(sched.feedingTimes)
         } else {
-          // mismatch → set local preview to new evenly-spaced times (we'll also auto-upsert below)
+          // mismatch → set local preview to new evenly-spaced times (ending at 17:00)
           setFeedingTimes(generateTimes(pondFreq))
         }
 
@@ -130,6 +138,9 @@ export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleM
     if (autoResetKey === key) return // already did this reset
 
     const newTimes = generateTimes(pondFreq)
+    // extra safety: last must be 17:00
+    if (newTimes.length >= 1) newTimes[newTimes.length - 1] = "17:00"
+
     setAutoResetKey(key)
 
     // Persist immediate reset
@@ -151,7 +162,7 @@ export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleM
       .then(() => {
         toast({
           title: "Schedule reset",
-          description: `Pond feeding frequency is now ${pondFreq}×/day. The schedule was reset to match.`,
+          description: `Pond feeding frequency is now ${pondFreq}×/day. The schedule was reset .`,
         })
       })
       .catch((err) => {
@@ -258,7 +269,7 @@ export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleM
             </div>
             <div className="flex items-center gap-2 text-xs text-gray-600 mt-1">
               <Info className="h-3.5 w-3.5" />
-              Changing the pond’s feeding frequency will automatically reset this schedule to match.
+              Changing the pond’s feeding frequency will automatically reset this schedule to match (last time = 5:00 PM).
             </div>
           </div>
 
