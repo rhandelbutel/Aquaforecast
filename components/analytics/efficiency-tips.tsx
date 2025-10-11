@@ -1,4 +1,3 @@
-// components/analytics/efficiency-tips.tsx
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Lightbulb, TrendingUp, AlertCircle } from 'lucide-react'
@@ -8,7 +7,7 @@ interface EfficiencyTipsProps {
   pond: PondData
 }
 
-  const generateTips = (pond: PondData) => {
+const generateTips = (pond: PondData) => {
   const tips = []
   const stockingDensity = pond.fishCount / pond.area
 

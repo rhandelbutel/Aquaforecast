@@ -186,11 +186,6 @@ export class GrowthService {
     return Math.max(0, this.ABW_CADENCE_DAYS - days)
   }
 
-  /** Expose a tiny helper so UI/services can compute “ABW due” with the same rule. */
-  static isABWDue(lastABWUpdate: Timestamp | Date | unknown): boolean {
-    return this.canUpdateABW(lastABWUpdate)
-  }
-
   private static async addGrowthHistory(
     pondId: string,
     userId: string,

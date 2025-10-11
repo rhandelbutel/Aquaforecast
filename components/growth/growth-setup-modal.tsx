@@ -38,22 +38,33 @@ export function GrowthSetupModal({
 
   // history preview
   const [history, setHistory] = useState<GrowthHistory[]>([])
-  const [lastABW, setLastABW] = useState<number | null>(null)
-  const [prevABW, setPrevABW] = useState<number | null>(null)
-  const [weeklyGrowth, setWeeklyGrowth] = useState<number>(0)
+  const [lastABW, setLastABW] = useState<number | null>(null) // latest
+  const [prevABW, setPrevABW] = useState<number | null>(null) // previous
+  const [weeklyGrowth, setWeeklyGrowth] = useState<number>(0)  // latest - previous (or 0)
 
+  // dropdown (collapsible) state
   const [previewOpen, setPreviewOpen] = useState(false)
 
   const sharedPondId = pond.adminPondId || pond.id
 
-  const isTimestampLike = (v: unknown): v is { toDate: () => Date } =>
+  // ----- type guards and safe date -----
+  type FirestoreTimestampLike = { toDate: () => Date }
+  type FirestoreSecondsLike = { seconds: number }
+
+  const isTimestampLike = (v: unknown): v is FirestoreTimestampLike =>
     !!v && typeof (v as any).toDate === "function"
-  const isSecondsLike = (v: unknown): v is { seconds: number } =>
+
+  const isSecondsLike = (v: unknown): v is FirestoreSecondsLike =>
     !!v && typeof (v as any).seconds === "number"
+
   const safeDate = (value: unknown): Date | null => {
     if (!value) return null
-    if (isTimestampLike(value)) { try { return value.toDate() } catch { return null } }
-    if (isSecondsLike(value)) return new Date(value.seconds * 1000)
+    if (isTimestampLike(value)) {
+      try { return value.toDate() } catch { return null }
+    }
+    if (isSecondsLike(value)) {
+      return new Date(value.seconds * 1000)
+    }
     const d = new Date(value as any)
     return isNaN(d.getTime()) ? null : d
   }
@@ -63,12 +74,14 @@ export function GrowthSetupModal({
       loadExistingSetup()
       setCurrentABW("")
       setTargetWeight("")
+      // subscribe to shared history so admin/user see the same
       const unsub = GrowthService.subscribeGrowthHistory(sharedPondId, (items) => {
         setHistory(items)
         const latest = items[0]?.abw ?? null
         const prev = items[1]?.abw ?? null
         setLastABW(latest)
         setPrevABW(prev)
+        // compute weekly growth: 0 if not enough data
         const growth = latest != null && prev != null ? Number((latest - prev).toFixed(2)) : 0
         setWeeklyGrowth(growth)
       })
@@ -81,16 +94,12 @@ export function GrowthSetupModal({
     if (!user) return
     try {
       const setup = await GrowthService.getGrowthSetup(sharedPondId, user.uid)
+      const toStr = (n?: number | null) => (n ?? "").toString()
 
       if (setup) {
         setExistingSetup(setup)
-        // Show empty if not set yet
-        setCurrentABW(setup.currentABW > 0 ? String(setup.currentABW) : "")
-        setTargetWeight(
-          typeof setup.targetWeight === "number" && setup.targetWeight > 0
-            ? String(setup.targetWeight)
-            : ""
-        )
+        setTargetWeight(toStr(setup.targetWeight))
+        setCurrentABW(toStr(setup.currentABW))
         const days = setup.lastABWUpdate
           ? GrowthService.getDaysUntilNextUpdate(setup.lastABWUpdate)
           : 0
@@ -184,7 +193,7 @@ export function GrowthSetupModal({
       return
     }
 
-    // only target change while ABW is locked by cadence rule
+    // only target change while ABW is locked by weekly rule
     if (
       existingSetup &&
       !GrowthService.canUpdateABW(existingSetup.lastABWUpdate) &&
@@ -199,7 +208,7 @@ export function GrowthSetupModal({
       return
     }
 
-    // cadence restriction
+    // weekly restriction
     if (existingSetup && !GrowthService.canUpdateABW(existingSetup.lastABWUpdate)) {
       toast({
         title: "Error",
@@ -249,9 +258,6 @@ export function GrowthSetupModal({
       ? { tone: "text-yellow-700", text: `Next ABW update available in ${daysUntilNextUpdate} days` }
       : { tone: "text-green-700", text: "Weekly ABW due: you can record a new ABW now" })
 
-  const showABWNotSet = !!existingSetup && (existingSetup.currentABW ?? 0) <= 0
-  const showTargetNotSet = !!existingSetup && !(typeof existingSetup.targetWeight === "number" && existingSetup.targetWeight > 0)
-
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-md">
@@ -276,7 +282,6 @@ export function GrowthSetupModal({
               <Label htmlFor="currentABW" className="flex items-center gap-2">
                 <Scale className="h-4 w-4" />
                 Current Average Body Weight (g)
-                {showABWNotSet && <span className="text-xs text-gray-500">(not set)</span>}
               </Label>
               <Input
                 id="currentABW"
@@ -294,7 +299,6 @@ export function GrowthSetupModal({
               <Label htmlFor="targetWeight" className="flex items-center gap-2">
                 <Target className="h-4 w-4" />
                 Target Weight (g)
-                {showTargetNotSet && <span className="text-xs text-gray-500">(not set)</span>}
               </Label>
               <Input
                 id="targetWeight"
@@ -309,13 +313,15 @@ export function GrowthSetupModal({
             </div>
           </div>
 
-          {/* Preview & History */}
+          {/* Weekly Preview & History — now a dropdown (collapsible) */}
           <Collapsible open={previewOpen} onOpenChange={setPreviewOpen} className="rounded-lg border">
             <div className="flex items-center justify-between px-3 py-2">
               <p className="text-sm font-medium">Growth Preview</p>
               <CollapsibleTrigger asChild>
                 <Button variant="ghost" size="sm" className="h-8 w-8 p-0" aria-label="Toggle preview">
-                  <ChevronDown className={`h-4 w-4 transition-transform ${previewOpen ? "rotate-180" : ""}`} />
+                  <ChevronDown
+                    className={`h-4 w-4 transition-transform ${previewOpen ? "rotate-180" : ""}`}
+                  />
                 </Button>
               </CollapsibleTrigger>
             </div>
@@ -336,6 +342,7 @@ export function GrowthSetupModal({
                 </div>
               </div>
 
+              {/* Small history list */}
               <div className="mt-3">
                 <p className="text-xs text-gray-500 mb-1">Recent ABW History</p>
                 <ul className="space-y-1 max-h-28 overflow-auto pr-1">

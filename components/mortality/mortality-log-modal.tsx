@@ -1,24 +1,21 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { X, Calendar, Fish, AlertTriangle, AlertCircle } from "lucide-react"
+import { X, Calendar, Fish, AlertTriangle } from "lucide-react"
 
 import { useAuth } from "@/lib/auth-context"
 import {
   getMortalityLogs,
   computeSurvivalRateFromLogs,
   updateMortalityLogRate,
-  upsertMortalityRateForDate,
-  createMortalityLogMonotonic, // ✅ NEW (create new doc when ABW due)
   type MortalityLog,
 } from "@/lib/mortality-service"
 import type { UnifiedPond } from "@/lib/pond-context"
-import { GrowthService, type GrowthSetup } from "@/lib/growth-service"
 
 interface MortalityLogModalProps {
   isOpen: boolean
@@ -37,14 +34,11 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
   const [logs, setLogs] = useState<MortalityLog[]>([])
   const [latest, setLatest] = useState<MortalityLog | null>(null)
   const [editingRate, setEditingRate] = useState<string>("")
-  const [dateStr, setDateStr] = useState<string>("")
-  const [setup, setSetup] = useState<GrowthSetup | null>(null)
-  const [isAbwDue, setIsAbwDue] = useState<boolean>(false)
-  const [daysUntil, setDaysUntil] = useState<number>(0)
 
   const sharedPondId = (pond as any)?.adminPondId || pond?.id
 
-  const toYMD = (date: Date) =>
+  // helpers
+  const phDateString = (date: Date) =>
     new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Manila",
       year: "numeric",
@@ -52,34 +46,22 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
       day: "2-digit",
     }).format(date)
 
+  // load all logs (we’ll use the latest for editing and all for survival calc)
   useEffect(() => {
     if (!isOpen || !sharedPondId) return
     ;(async () => {
-      setLoading(true)
       try {
-        // growth setup (for cadence)
-        const s = await GrowthService.getGrowthSetup(sharedPondId, "shared")
-        setSetup(s)
-        setIsAbwDue(!!s ? GrowthService.isABWDue(s.lastABWUpdate) : true)
-        setDaysUntil(!!s ? GrowthService.getDaysUntilNextUpdate(s.lastABWUpdate) : 0)
-
-        // mortality logs
         const l = await getMortalityLogs(sharedPondId)
         setLogs(l)
         const newest = l[0] ?? null
         setLatest(newest)
-
-        // initial inputs
         setEditingRate(
           typeof newest?.mortalityRate === "number" ? String(newest.mortalityRate) : ""
         )
-        setDateStr(newest?.date ? toYMD(new Date(newest.date)) : toYMD(new Date()))
         setError("")
       } catch (e) {
         console.error(e)
         setError("Failed to load mortality record.")
-      } finally {
-        setLoading(false)
       }
     })()
   }, [isOpen, sharedPondId])
@@ -91,26 +73,13 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
   const latestRate =
     typeof latest?.mortalityRate === "number" ? latest.mortalityRate : undefined
 
-  const parsedDate: Date | null = useMemo(() => {
-    if (!dateStr) return null
-    const [y, m, d] = dateStr.split("-").map((n) => Number(n))
-    if (!y || !m || !d) return null
-    return new Date(y, m - 1, d)
-  }, [dateStr])
-
-  const previousRate = useMemo(() => (logs[0]?.mortalityRate ?? undefined), [logs])
-
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!user || !sharedPondId) return
+    if (!user || !sharedPondId || !latest?.id) return
 
     const rate = Number.parseFloat(editingRate)
     if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
       setError("Enter a valid mortality rate between 0 and 100.")
-      return
-    }
-    if (!parsedDate) {
-      setError("Invalid date.")
       return
     }
 
@@ -118,21 +87,9 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
     setError("")
     setSuccess("")
     try {
-      if (isAbwDue || !latest) {
-        // 🆕 New 15-day period (or first ever) → create a NEW mortality doc
-        await createMortalityLogMonotonic({
-          pondId: sharedPondId,
-          pondName: pond.name,
-          userId: user.uid,
-          date: parsedDate,
-          mortalityRate: rate,
-        })
-      } else {
-        // Same period → allow update of the latest record
-        await updateMortalityLogRate(sharedPondId, latest.id!, rate)
-      }
-
-      setSuccess(isAbwDue || !latest ? "Mortality recorded for new period." : "Mortality rate updated.")
+      await updateMortalityLogRate(sharedPondId, latest.id, rate)
+      setSuccess("Mortality rate updated.")
+      // refresh logs & derived metrics
       const l = await getMortalityLogs(sharedPondId)
       setLogs(l)
       const newest = l[0] ?? null
@@ -140,12 +97,11 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
       setEditingRate(
         typeof newest?.mortalityRate === "number" ? String(newest.mortalityRate) : ""
       )
-      setDateStr(newest?.date ? toYMD(new Date(newest.date)) : toYMD(new Date()))
       setTimeout(() => setSuccess(""), 1400)
       onSuccess?.()
-    } catch (err: any) {
+    } catch (err) {
       console.error(err)
-      setError(err?.message || "Failed to save mortality. Please try again.")
+      setError("Failed to update mortality rate. Please try again.")
     } finally {
       setSaving(false)
     }
@@ -168,17 +124,7 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
         </CardHeader>
 
         <CardContent className="space-y-6">
-          {/* cadence banner */}
-          {setup && (
-            <div className={`text-xs flex items-center gap-2 ${isAbwDue ? "text-indigo-700" : "text-yellow-700"}`}>
-              <AlertCircle className="h-4 w-4" />
-              {isAbwDue
-                ? "New 15-day period: you can record a new mortality rate now (must be ≥ previous)."
-                : `Next period in ${daysUntil} day(s). You can still edit the current period's value.`}
-            </div>
-          )}
-
-          {/* TOP METRICS */}
+          {/* TOP METRICS (match screenshot style but with requested values) */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-gray-50 rounded-lg">
             <div className="text-center">
               <div className="text-2xl font-bold text-green-600">
@@ -202,9 +148,9 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
             </div>
           </div>
 
-          {/* EDIT FORM */}
+          {/* EDIT FORM (latest only) */}
           <form onSubmit={handleSave} className="space-y-4 border-t pt-4">
-            <h3 className="text-lg font-semibold">Record Mortality</h3>
+            <h3 className="text-lg font-semibold">Edit Latest Mortality</h3>
 
             {error && (
               <Alert variant="destructive">
@@ -223,7 +169,12 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
               <div className="space-y-2">
                 <Label htmlFor="mortality-date">Date</Label>
                 <div className="relative">
-                  <Input id="mortality-date" type="date" value={dateStr} disabled />
+                  <Input
+                    id="mortality-date"
+                    type="date"
+                    value={latest ? phDateString(latest.date) : ""}
+                    disabled
+                  />
                   <Calendar className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
                 </div>
               </div>
@@ -241,11 +192,6 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
                   placeholder="Enter mortality %"
                   required
                 />
-                {isAbwDue && typeof previousRate === "number" && (
-                  <p className="text-xs text-gray-500">
-                    Must be ≥ previous period’s {previousRate}%.
-                  </p>
-                )}
               </div>
             </div>
 
@@ -262,9 +208,9 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
               <Button
                 type="submit"
                 className="flex-1 bg-red-600 hover:bg-red-700"
-                disabled={loading || saving}
+                disabled={loading || saving || !latest}
               >
-                {saving ? "Saving..." : isAbwDue || !latest ? "Save (New Period)" : "Save Changes"}
+                {saving ? "Saving..." : "Save Changes"}
               </Button>
             </div>
           </form>

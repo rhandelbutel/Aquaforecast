@@ -11,10 +11,9 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 
 interface PondsWithDataProps {
   ponds: UnifiedPond[]
-  onClickHarvest?: () => void   // <-- NEW: open Harvest modal from header
 }
 
-export function PondsWithData({ ponds, onClickHarvest }: PondsWithDataProps) {
+export function PondsWithData({ ponds }: PondsWithDataProps) {
   const [showAddPond, setShowAddPond] = useState(false)
   const [showPondLimitAlert, setShowPondLimitAlert] = useState(false)
 
@@ -29,22 +28,15 @@ export function PondsWithData({ ponds, onClickHarvest }: PondsWithDataProps) {
   return (
     <>
       <div className="space-y-6">
-        <div className="flex items-start justify-between">
+        <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Pond Overview</h1>
             <p className="text-gray-600 mt-1">Monitor all your fish ponds</p>
           </div>
-
-          {/* Right-side actions: Add on top, Harvest below it */}
-          <div className="flex flex-col items-end gap-2">
-            <Button className="bg-cyan-600 hover:bg-cyan-700" onClick={handleAddPond}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add New Pond
-            </Button>
-            <Button variant="outline" onClick={onClickHarvest}>
-              Harvest
-            </Button>
-          </div>
+          <Button className="bg-cyan-600 hover:bg-cyan-700" onClick={handleAddPond}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add New Pond
+          </Button>
         </div>
 
         <PondStats ponds={ponds} />

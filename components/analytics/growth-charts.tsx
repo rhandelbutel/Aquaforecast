@@ -99,6 +99,15 @@ function buildPredictedSeries(
   return pred
 }
 
+/** Synthetic efficiency data (unchanged) */
+const generateFeedEfficiencyData = (pond: PondData) => {
+  const base = pond.feedingFrequency >= 3 ? 1.3 : pond.feedingFrequency >= 2 ? 1.2 : 1.0
+  return ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => ({
+    day,
+    efficiency: base + (Math.random() - 0.5) * 0.2,
+  }))
+}
+
 interface GrowthChartsProps {
   pond: PondData
 }
@@ -106,9 +115,8 @@ interface GrowthChartsProps {
 export function GrowthCharts({ pond }: GrowthChartsProps) {
   const sharedPondId = (pond as any)?.adminPondId || pond.id
 
-  // survival (current & series)
+  // survival
   const [survivalPct, setSurvivalPct] = useState<number | null>(null)
-  const [mortLogs, setMortLogs] = useState<MortalityLog[]>([])
   const initialStocked = pond.fishCount || 0
 
   // growth setup
@@ -122,7 +130,6 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
     if (!sharedPondId) return
 
     const unsubMort = subscribeMortalityLogs(sharedPondId, (logs: MortalityLog[]) => {
-      setMortLogs(logs)
       setSurvivalPct(computeSurvivalRateFromLogs(logs))
     })
 
@@ -156,7 +163,7 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
     return initialStocked
   }, [survivalPct, initialStocked])
 
-  // Actual series for ABW chart
+  // Actual series for chart
   const actualSeries = useMemo(
     () =>
       history.map((h, idx) => ({
@@ -172,13 +179,13 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
     currentABW ??
     5
 
-  // Predicted ABW series
+  // Predicted series: baseline + rebase after latest actual (15-day cadence)
   const predictedSeries = useMemo(() => {
     const actualOnly = actualSeries.map((a) => a.actual)
     return buildPredictedSeries(actualOnly, seedForP1, targetWeight ?? null, 8)
   }, [actualSeries, seedForP1, targetWeight])
 
-  // Merge for ABW chart
+  // Merge for Recharts
   const chartData = useMemo(() => {
     const maxPts = Math.max(actualSeries.length, predictedSeries.length)
     const rows: { label: string; actual: number | null; predicted: number | null }[] = []
@@ -191,43 +198,6 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
     }
     return rows
   }, [actualSeries, predictedSeries])
-
-  // ---- Survival Rate Curve data (replaces FCE chart) ----
-  const survivalCurveData = useMemo(() => {
-    // logs from subscribeMortalityLogs are sorted desc; make chronological
-    const chrono = [...mortLogs].sort((a, b) => {
-      const ta = a.date instanceof Date ? a.date.getTime() : new Date(a.date as any).getTime()
-      const tb = b.date instanceof Date ? b.date.getTime() : new Date(b.date as any).getTime()
-      return ta - tb
-    })
-
-    const rows: { label: string; survival: number }[] = []
-    let cumulativeMortality = 0
-
-    // optional starting point at 100%
-    if (chrono.length === 0) {
-      rows.push({ label: "Start", survival: 100 })
-      return rows
-    }
-
-    rows.push({
-      label: "Start",
-      survival: 100,
-    })
-
-    for (const log of chrono) {
-      const add = typeof log.mortalityRate === "number" ? Math.max(0, Math.min(100, log.mortalityRate)) : 0
-      cumulativeMortality = Math.min(100, cumulativeMortality + add)
-      const survival = Math.max(0, 100 - cumulativeMortality)
-
-      const d = log.date instanceof Date ? log.date : new Date(log.date as any)
-      const label = d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
-
-      rows.push({ label, survival })
-    }
-
-    return rows
-  }, [mortLogs])
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -286,31 +256,20 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
         </CardContent>
       </Card>
 
-      {/* Survival Rate Curve (replaces FCE chart, keeps design) */}
+      {/* Feed Conversion Efficiency (placeholder) */}
       <Card>
         <CardHeader>
-          <CardTitle>Survival Rate Curve - {pond.name}</CardTitle>
-          <p className="text-sm text-gray-600">
-            Cumulative survival over time (based on recorded mortality %)
-          </p>
+          <CardTitle>Feed Conversion Efficiency - {pond.name}</CardTitle>
+          <p className="text-sm text-gray-600">Current feeding: {pond.feedingFrequency ?? 0}x daily</p>
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={320}>
-            <AreaChart data={survivalCurveData}>
+            <AreaChart data={generateFeedEfficiencyData(pond)}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="label" />
-              <YAxis domain={[0, 100]} />
-              <Tooltip
-                formatter={(value: any) => [`${Number(value).toFixed(1)}%`, "Survival"]}
-              />
-              <Area
-                type="monotone"
-                dataKey="survival"
-                stroke="#2563eb"
-                fill="#2563eb"
-                fillOpacity={0.3}
-                name="Survival %"
-              />
+              <XAxis dataKey="day" />
+              <YAxis />
+              <Tooltip />
+              <Area type="monotone" dataKey="efficiency" stroke="#2563eb" fill="#2563eb" fillOpacity={0.3} />
             </AreaChart>
           </ResponsiveContainer>
         </CardContent>
