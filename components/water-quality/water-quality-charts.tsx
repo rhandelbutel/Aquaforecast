@@ -1,18 +1,28 @@
-// app/(wherever)/water-quality/water-quality-charts.tsx
+// app/water-quality/water-quality-charts.tsx
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  ReferenceLine,
+  ReferenceArea,
+} from "recharts";
 import { useAquaSensors } from "@/hooks/useAquaSensors";
 import { useUser } from "@/lib/user-context";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle, AlertTriangle, XCircle, AlertCircle } from "lucide-react";
-import { Alert, AlertDescription } from "@/components/ui/alert"; // ⬅️ NEW
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 type SeriesPoint = { time: string; ts: number; value: number | null };
 
-// ⬇️ consider device offline if no fresh data within this window
+// consider device offline if no fresh data within this window
 const ONLINE_GRACE_MS = 20_000;
 
 function formatTwoDecimals(v: unknown) {
@@ -64,8 +74,8 @@ function useRolling24hSeries() {
     tds: [] as SeriesPoint[],
   });
 
-  const [lastSeen, setLastSeen] = useState<number | null>(null); // ⬅️ NEW
-  const [tick, setTick] = useState(0);                           // ⬅️ refresh online calc each sec
+  const [lastSeen, setLastSeen] = useState<number | null>(null);
+  const [tick, setTick] = useState(0);
   const lastTsRef = useRef<number | null>(null);
 
   // heartbeat timer for online state
@@ -82,23 +92,24 @@ function useRolling24hSeries() {
     if (lastTsRef.current && now - lastTsRef.current < 1000) return;
     lastTsRef.current = now;
 
-    setLastSeen(now); // ⬅️ mark last successful arrival
+    setLastSeen(now);
 
     setSeries(prev => {
       const push = (arr: SeriesPoint[], value: number | null) => {
         const next = [...arr, { ts: now, time: formatTime(now), value }];
         return next.filter(p => p.ts >= windowStart);
       };
+      const toNum = (x: any) => (isFinite(Number(x)) ? Number(x) : null);
       return {
-        temp: push(prev.temp, isFinite(Number(data.temp)) ? Number(data.temp) : null),
-        ph: push(prev.ph, isFinite(Number(data.ph)) ? Number(data.ph) : null),
-        do: push(prev.do, isFinite(Number(data.do)) ? Number(data.do) : null),
-        tds: push(prev.tds, isFinite(Number(data.tds)) ? Number(data.tds) : null),
+        temp: push(prev.temp, toNum(data.temp)),
+        ph: push(prev.ph, toNum(data.ph)),
+        do: push(prev.do, toNum(data.do)),
+        tds: push(prev.tds, toNum(data.tds)),
       };
     });
   }, [data]);
 
-  const online = lastSeen != null && Date.now() - lastSeen <= ONLINE_GRACE_MS; // ⬅️ NEW
+  const online = lastSeen != null && Date.now() - lastSeen <= ONLINE_GRACE_MS;
 
   const yDomains = useMemo(() => ({
     temp: ['dataMin - 1', 'dataMax + 1'] as any,
@@ -117,25 +128,42 @@ function useRolling24hSeries() {
   return { ...series, yDomains, online, lastAgo };
 }
 
-const Chart = ({
-  title, data, yDomain, min, max, unit, offline,
-}: {
+const COLORS = {
+  green: "#22c55e",  // tailwind emerald-500
+  yellow: "#eab308", // amber-500
+  red: "#ef4444",    // red-500
+};
+
+type ChartStatusProps = {
   title: string;
   data: SeriesPoint[];
   yDomain?: any;
   min: number;
   max: number;
   unit?: string;
-  offline: boolean;            // ⬅️ NEW
-}) => {
+  offline: boolean;
+  warnMarginPct?: number; // width of warning band
+};
+
+const Chart = ({
+  title, data, yDomain, min, max, unit, offline, warnMarginPct = 0.10,
+}: ChartStatusProps) => {
+  // guard invalid ranges
+  const hasRange = isFinite(min) && isFinite(max) && max > min;
+  const span = hasRange ? (max - min) : 1;
+  const margin = span * warnMarginPct;
+
+  const lowerWarn = min - margin;
+  const upperWarn = max + margin;
+
   // compute last reading + status
   const lastVal = data.length ? data[data.length - 1].value : null;
-  const status = offline ? "offline" : statusOf(lastVal, min, max);
+  const status = offline ? "offline" : statusOf(lastVal, min, max, warnMarginPct);
   const StatusIcon =
     status === "optimal" ? CheckCircle :
     status === "warning" ? AlertTriangle :
     status === "danger"  ? XCircle :
-    AlertCircle; // offline icon
+    AlertCircle;
 
   return (
     <Card>
@@ -156,6 +184,7 @@ const Chart = ({
           </Badge>
         </div>
       </CardHeader>
+
       <CardContent>
         <ResponsiveContainer width="100%" height={300}>
           <LineChart data={data}>
@@ -163,6 +192,28 @@ const Chart = ({
             <XAxis dataKey="time" minTickGap={24} />
             <YAxis domain={yDomain ?? ["auto", "auto"]} tickFormatter={formatTwoDecimals as any} />
             <Tooltip formatter={(value) => (unit ? `${formatTwoDecimals(value)} ${unit}` : formatTwoDecimals(value))} />
+
+            {/* ===== STATUS BANDS & LINES ===== */}
+            {hasRange && (
+              <>
+                {/* Optimal band */}
+                <ReferenceArea y1={min} y2={max} fill={COLORS.green} fillOpacity={0.08} />
+
+                {/* Warning bands (below min and above max by margin) */}
+                <ReferenceArea y1={lowerWarn} y2={min} fill={COLORS.yellow} fillOpacity={0.10} />
+                <ReferenceArea y1={max} y2={upperWarn} fill={COLORS.yellow} fillOpacity={0.10} />
+
+                {/* Danger lines (outside warning). These are guide rails. */}
+                <ReferenceLine y={lowerWarn} stroke={COLORS.red} strokeDasharray="6 6" strokeWidth={1} ifOverflow="extendDomain" />
+                <ReferenceLine y={upperWarn} stroke={COLORS.red} strokeDasharray="6 6" strokeWidth={1} ifOverflow="extendDomain" />
+
+                {/* Optimal limits */}
+                <ReferenceLine y={min} stroke={COLORS.green} strokeDasharray="4 4" strokeWidth={1} ifOverflow="extendDomain" />
+                <ReferenceLine y={max} stroke={COLORS.green} strokeDasharray="4 4" strokeWidth={1} ifOverflow="extendDomain" />
+              </>
+            )}
+
+            {/* Main series */}
             <Line
               type="monotone"
               dataKey="value"
@@ -170,12 +221,21 @@ const Chart = ({
               dot={false}
               connectNulls
               isAnimationActive={false}
-              opacity={offline ? 0.35 : 1}   // ⬅️ dim when offline
+              opacity={offline ? 0.35 : 1}
             />
           </LineChart>
         </ResponsiveContainer>
-        <div className="mt-2 text-xs text-gray-500">
-          Range: {min}{unit ? ` ${unit}` : ""} – {max}{unit ? ` ${unit}` : ""}
+
+        <div className="mt-2 text-xs text-gray-600 space-y-0.5">
+          <div>
+            Range: {min}{unit ? ` ${unit}` : ""} – {max}{unit ? ` ${unit}` : ""}{" "}
+            <span className="ml-2">• Warning margin ±{Math.round(warnMarginPct * 100)}%</span>
+          </div>
+          <div className="flex gap-4">
+            <span className="inline-flex items-center gap-1"><span className="w-3 h-1 rounded-sm" style={{background: COLORS.green}} /> Optimal</span>
+            <span className="inline-flex items-center gap-1"><span className="w-3 h-1 rounded-sm" style={{background: COLORS.yellow}} /> Warning</span>
+            <span className="inline-flex items-center gap-1"><span className="w-3 h-1 rounded-sm" style={{background: COLORS.red}} /> Danger</span>
+          </div>
         </div>
       </CardContent>
     </Card>
@@ -186,13 +246,17 @@ export function WaterQualityCharts({ pondId }: { pondId: string }) {
   void pondId;
 
   const { preferences } = useUser();
-  const prefs = preferences || { tempMin: 28, tempMax: 31, phMin: 6.5, phMax: 9.0, doMin: 3, doMax: 5, tdsMin: 100, tdsMax: 400 };
+  const prefs = preferences || {
+    tempMin: 28, tempMax: 31,
+    phMin: 6.5, phMax: 9.0,
+    doMin: 3,   doMax: 5,
+    tdsMin: 100, tdsMax: 400
+  };
 
-  const { temp, ph, do: doSeries, tds, yDomains, online, lastAgo } = useRolling24hSeries(); // ⬅️ grab online + lastAgo
+  const { temp, ph, do: doSeries, tds, yDomains, online, lastAgo } = useRolling24hSeries();
 
   return (
     <div className="space-y-6">
-      {/* ⬇️ OFFLINE ALERT BANNER */}
       {!online && (
         <Alert variant="destructive" className="border-red-300">
           <AlertCircle className="h-4 w-4" />
@@ -203,10 +267,45 @@ export function WaterQualityCharts({ pondId }: { pondId: string }) {
       )}
 
       <div className="grid grid-cols-1 gap-6">
-        <Chart title="Temperature (Live, 24h)" data={temp} yDomain={yDomains.temp} min={prefs.tempMin} max={prefs.tempMax} unit="°C" offline={!online} />
-        <Chart title="pH Level (Live, 24h)"   data={ph}   yDomain={yDomains.ph}   min={prefs.phMin}  max={prefs.phMax} offline={!online} />
-        <Chart title="Dissolved Oxygen (Live, 24h)" data={doSeries} yDomain={yDomains.do} min={prefs.doMin} max={prefs.doMax} unit="mg/L" offline={!online} />
-        <Chart title="TDS (Live, 24h)" data={tds} yDomain={yDomains.tds} min={prefs.tdsMin} max={prefs.tdsMax} unit="ppm" offline={!online} />
+        <Chart
+          title="Temperature (Live, 24h)"
+          data={temp}
+          yDomain={yDomains.temp}
+          min={prefs.tempMin}
+          max={prefs.tempMax}
+          unit="°C"
+          offline={!online}
+          warnMarginPct={0.10}
+        />
+        <Chart
+          title="pH Level (Live, 24h)"
+          data={ph}
+          yDomain={yDomains.ph}
+          min={prefs.phMin}
+          max={prefs.phMax}
+          offline={!online}
+          warnMarginPct={0.08}
+        />
+        <Chart
+          title="Dissolved Oxygen (Live, 24h)"
+          data={doSeries}
+          yDomain={yDomains.do}
+          min={prefs.doMin}
+          max={prefs.doMax}
+          unit="mg/L"
+          offline={!online}
+          warnMarginPct={0.12}
+        />
+        <Chart
+          title="TDS (Live, 24h)"
+          data={tds}
+          yDomain={yDomains.tds}
+          min={prefs.tdsMin}
+          max={prefs.tdsMax}
+          unit="ppm"
+          offline={!online}
+          warnMarginPct={0.10}
+        />
       </div>
     </div>
   );
