@@ -1,18 +1,20 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { X, Calendar, Fish, AlertTriangle } from "lucide-react"
+import { X, Calendar, Fish, AlertTriangle, AlertCircle } from "lucide-react"
 
 import { useAuth } from "@/lib/auth-context"
 import {
   getMortalityLogs,
   computeSurvivalRateFromLogs,
-  updateMortalityLogRate,
+  createMortalityLogMonotonic,
+  canCreateMortalityNow,
+  daysUntilNextMortality,
   type MortalityLog,
 } from "@/lib/mortality-service"
 import type { UnifiedPond } from "@/lib/pond-context"
@@ -26,19 +28,20 @@ interface MortalityLogModalProps {
 
 export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: MortalityLogModalProps) {
   const { user } = useAuth()
-
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
+
   const [logs, setLogs] = useState<MortalityLog[]>([])
-  const [latest, setLatest] = useState<MortalityLog | null>(null)
-  const [editingRate, setEditingRate] = useState<string>("")
+  const [lastLogDate, setLastLogDate] = useState<Date | null>(null)
+
+  const [rateStr, setRateStr] = useState("")
+  const [dateStr, setDateStr] = useState("")
 
   const sharedPondId = (pond as any)?.adminPondId || pond?.id
 
-  // helpers
-  const phDateString = (date: Date) =>
+  const toYMD = (date: Date) =>
     new Intl.DateTimeFormat("en-CA", {
       timeZone: "Asia/Manila",
       year: "numeric",
@@ -46,40 +49,47 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
       day: "2-digit",
     }).format(date)
 
-  // load all logs (we’ll use the latest for editing and all for survival calc)
   useEffect(() => {
     if (!isOpen || !sharedPondId) return
     ;(async () => {
+      setLoading(true)
       try {
         const l = await getMortalityLogs(sharedPondId)
         setLogs(l)
-        const newest = l[0] ?? null
-        setLatest(newest)
-        setEditingRate(
-          typeof newest?.mortalityRate === "number" ? String(newest.mortalityRate) : ""
-        )
+        const latest = l[0] ?? null
+        setLastLogDate(latest?.date ?? null)
+
+        setDateStr(toYMD(new Date())) // always today; no editing
+        setRateStr("")
         setError("")
+        setSuccess("")
       } catch (e) {
         console.error(e)
         setError("Failed to load mortality record.")
+      } finally {
+        setLoading(false)
       }
     })()
   }, [isOpen, sharedPondId])
 
-  // derived metrics
   const initialFishCount = pond?.fishCount || 0
-  const survivalPct = computeSurvivalRateFromLogs(logs) // 0–100
+  const survivalPct = computeSurvivalRateFromLogs(logs)
   const estimatedAlive = Math.max(0, Math.round((survivalPct / 100) * initialFishCount))
-  const latestRate =
-    typeof latest?.mortalityRate === "number" ? latest.mortalityRate : undefined
+
+  const isDue = canCreateMortalityNow(lastLogDate)
+  const daysLeft = daysUntilNextMortality(lastLogDate)
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!user || !sharedPondId || !latest?.id) return
+    if (!user || !sharedPondId) return
 
-    const rate = Number.parseFloat(editingRate)
-    if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
-      setError("Enter a valid mortality rate between 0 and 100.")
+    const rate = Number.parseFloat(rateStr)
+    if (!Number.isFinite(rate) || rate <= 0 || rate > 100) {
+      setError("Enter a valid mortality rate (> 0 and ≤ 100).")
+      return
+    }
+    if (!isDue) {
+      setError(`Not due yet. You can record again in ${daysLeft} day(s).`)
       return
     }
 
@@ -87,21 +97,26 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
     setError("")
     setSuccess("")
     try {
-      await updateMortalityLogRate(sharedPondId, latest.id, rate)
-      setSuccess("Mortality rate updated.")
-      // refresh logs & derived metrics
+      await createMortalityLogMonotonic({
+        pondId: sharedPondId,
+        pondName: pond.name,
+        userId: user.uid,
+        date: new Date(), // today only (no edit)
+        mortalityRate: rate,
+      })
+
+      // refresh
       const l = await getMortalityLogs(sharedPondId)
       setLogs(l)
-      const newest = l[0] ?? null
-      setLatest(newest)
-      setEditingRate(
-        typeof newest?.mortalityRate === "number" ? String(newest.mortalityRate) : ""
-      )
-      setTimeout(() => setSuccess(""), 1400)
+      const latest = l[0] ?? null
+      setLastLogDate(latest?.date ?? null)
+
+      setRateStr("")
+      setSuccess("Mortality recorded for this 15-day period.")
       onSuccess?.()
-    } catch (err) {
+    } catch (err: any) {
       console.error(err)
-      setError("Failed to update mortality rate. Please try again.")
+      setError(err?.message || "Failed to save mortality. Please try again.")
     } finally {
       setSaving(false)
     }
@@ -110,9 +125,8 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
       <Card className="w-full max-w-3xl max-h-[90vh] overflow-y-auto">
-        {/* Header */}
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <CardTitle className="text-xl flex items-center">
             <Fish className="h-5 w-5 mr-2 text-red-600" />
@@ -124,7 +138,15 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
         </CardHeader>
 
         <CardContent className="space-y-6">
-          {/* TOP METRICS (match screenshot style but with requested values) */}
+          {/* Cadence banner */}
+          <div className={`text-xs flex items-center gap-2 ${isDue ? "text-indigo-700" : "text-yellow-700"}`}>
+            <AlertCircle className="h-4 w-4" />
+            {isDue
+              ? "New 15-day period: you can record a new mortality rate now."
+              : `Next entry allowed in ${daysLeft} day(s).`}
+          </div>
+
+          {/* Top metrics */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-gray-50 rounded-lg">
             <div className="text-center">
               <div className="text-2xl font-bold text-green-600">
@@ -133,24 +155,20 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
               <div className="text-sm text-gray-600">Estimated Fish Alive</div>
             </div>
             <div className="text-center">
-              <div className="text-2xl font-bold text-orange-600">
-                {typeof latestRate === "number" ? `${latestRate}%` : "—"}
-              </div>
-              <div className="text-sm text-gray-600">Latest Mortality Rate</div>
+              <div className="text-2xl font-bold text-blue-600">{survivalPct.toFixed(1)}%</div>
+              <div className="text-sm text-gray-600">Survival % = (Alive ÷ Stocked) × 100</div>
             </div>
             <div className="text-center">
-              <div className="text-2xl font-bold text-blue-600">
-                {survivalPct.toFixed(1)}%
+              <div className="text-2xl font-bold text-gray-700">
+                {lastLogDate ? toYMD(lastLogDate) : "—"}
               </div>
-              <div className="text-sm text-gray-600">
-                Survival % = (Alive ÷ Stocked) × 100
-              </div>
+              <div className="text-sm text-gray-600">Last Mortality Entry</div>
             </div>
           </div>
 
-          {/* EDIT FORM (latest only) */}
+          {/* Create-only form */}
           <form onSubmit={handleSave} className="space-y-4 border-t pt-4">
-            <h3 className="text-lg font-semibold">Edit Latest Mortality</h3>
+            <h3 className="text-lg font-semibold">Record Mortality (every 15 days)</h3>
 
             {error && (
               <Alert variant="destructive">
@@ -167,16 +185,12 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="mortality-date">Date</Label>
+                <Label>Date</Label>
                 <div className="relative">
-                  <Input
-                    id="mortality-date"
-                    type="date"
-                    value={latest ? phDateString(latest.date) : ""}
-                    disabled
-                  />
-                  <Calendar className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                  <Input type="date" value={dateStr} disabled />
+                  <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
                 </div>
+                <p className="text-xs text-gray-500">Date is fixed to today. Entries are allowed once every 15 days.</p>
               </div>
 
               <div className="space-y-2">
@@ -187,30 +201,20 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
                   min={0}
                   max={100}
                   step={0.1}
-                  value={editingRate}
-                  onChange={(e) => setEditingRate(e.target.value)}
-                  placeholder="Enter mortality %"
+                  value={rateStr}
+                  onChange={(e) => setRateStr(e.target.value)}
+                  placeholder="e.g. 1.5"
                   required
                 />
               </div>
             </div>
 
             <div className="flex gap-3 pt-4">
-              <Button
-                type="button"
-                variant="outline"
-                className="flex-1 bg-transparent"
-                onClick={onClose}
-                disabled={loading || saving}
-              >
+              <Button type="button" variant="outline" className="flex-1 bg-transparent" onClick={onClose} disabled={loading || saving}>
                 Cancel
               </Button>
-              <Button
-                type="submit"
-                className="flex-1 bg-red-600 hover:bg-red-700"
-                disabled={loading || saving || !latest}
-              >
-                {saving ? "Saving..." : "Save Changes"}
+              <Button type="submit" className="flex-1 bg-red-600 hover:bg-red-700" disabled={loading || saving || !isDue}>
+                {saving ? "Saving..." : "Save (New Period)"}
               </Button>
             </div>
           </form>

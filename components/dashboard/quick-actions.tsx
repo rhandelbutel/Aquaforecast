@@ -14,7 +14,9 @@ import { GrowthSetupModal } from "@/components/growth/growth-setup-modal"
 
 import type { UnifiedPond } from "@/lib/pond-context"
 import { feedingScheduleService, type FeedingSchedule } from "@/lib/feeding-schedule-service"
-import { subscribeFeedingLogs, type FeedingLog } from "@/lib/feeding-service"
+import { subscribeMortalityLogs, type MortalityLog } from "@/lib/mortality-service"
+import { useAuth } from "@/lib/auth-context"
+import { subscribeUserProfile } from "@/lib/user-service"
 
 interface QuickActionsProps {
   pond: UnifiedPond
@@ -22,32 +24,58 @@ interface QuickActionsProps {
   onGrowthUpdate?: () => void
 }
 
+const DAY_MS = 86_400_000
+
 export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickActionsProps) {
   const router = useRouter()
+  const { user } = useAuth()
 
   const [showFeedingModal, setShowFeedingModal] = useState(false)
   const [showScheduleModal, setShowScheduleModal] = useState(false)
   const [showMortalityModal, setShowMortalityModal] = useState(false)
   const [showGrowthSetupModal, setShowGrowthSetupModal] = useState(false)
 
-  // ---- NEW: schedule + logs to power the badge ----
   const sharedPondId = (pond as any)?.adminPondId || pond?.id
-  const [schedule, setSchedule] = useState<FeedingSchedule | null>(null)
-  const [logs, setLogs] = useState<FeedingLog[]>([])
 
+  // ---- User phone badge (Settings) ----
+  const [hasPhone, setHasPhone] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (!user?.uid) return
+    const unsub = subscribeUserProfile(user.uid, (p) => {
+      setHasPhone(!!(p?.phone && p.phone.trim().length > 0))
+    })
+    return () => { try { unsub?.() } catch {} }
+  }, [user?.uid])
+
+  // ---- Schedule (for badges) ----
+  const [schedule, setSchedule] = useState<FeedingSchedule | null>(null)
   useEffect(() => {
     if (!sharedPondId) return
-
-    const unsubSched = feedingScheduleService.subscribeByPond(sharedPondId, (s) => setSchedule(s))
-    const unsubLogs = subscribeFeedingLogs(sharedPondId, (arr) => setLogs(arr))
-
-    return () => {
-      try { unsubSched?.() } catch {}
-      try { unsubLogs?.() } catch {}
-    }
+    const unsub = feedingScheduleService.subscribeByPond(sharedPondId, (s) => setSchedule(s))
+    return () => { try { unsub?.() } catch {} }
   }, [sharedPondId])
 
-  // Helpers to work with local time
+  // ---- Mortality cadence ----
+  const [lastMortalityDate, setLastMortalityDate] = useState<Date | null>(null)
+  useEffect(() => {
+    if (!sharedPondId) return
+    const unsub = subscribeMortalityLogs(sharedPondId, (logs: MortalityLog[]) => {
+      setLastMortalityDate(logs[0]?.date ?? null)
+    })
+    return () => { try { unsub?.() } catch {} }
+  }, [sharedPondId])
+
+  // tick for minute-level badges
+  const [nowTick, setNowTick] = useState(() => Date.now())
+  useEffect(() => {
+    const tick = () => setNowTick(Date.now())
+    const id = setInterval(tick, 15000)
+    const onVis = () => { if (document.visibilityState === "visible") tick() }
+    document.addEventListener("visibilitychange", onVis)
+    return () => { clearInterval(id); document.removeEventListener("visibilitychange", onVis) }
+  }, [])
+
+  // feeding helpers
   const makeDateForTime = (hhmm: string, base: Date) => {
     const [hh, mm] = (hhmm || "00:00").split(":").map((v) => Number(v))
     const d = new Date(base)
@@ -57,33 +85,12 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
   const dayMatches = (s: FeedingSchedule | null, d: Date) =>
     !s ? false : s.repeatType === "daily" ? true : (s.selectedDays ?? []).includes(d.getDay())
 
-  const enumerateScheduledBetween = (s: FeedingSchedule | null, from: Date, to: Date) => {
-    if (!s) return [] as Date[]
-    const out: Date[] = []
-    const cur = new Date(from)
-    cur.setHours(0, 0, 0, 0)
-    const limit = new Date(to)
-
-    while (cur <= limit) {
-      if (dayMatches(s, cur)) {
-        for (const t of s.feedingTimes) {
-          const dt = makeDateForTime(t, cur)
-          if (dt >= from && dt <= to) out.push(dt)
-        }
-      }
-      cur.setDate(cur.getDate() + 1)
-    }
-    return out.sort((a, b) => a.getTime() - b.getTime())
-  }
-
   const findNextScheduled = (s: FeedingSchedule | null, now: Date) => {
     if (!s) return null
-    // Try today, otherwise walk forward day by day until a matching day is found
     for (let i = 0; i < 14; i++) {
       const probe = new Date(now)
       probe.setDate(now.getDate() + i)
       if (!dayMatches(s, probe)) continue
-      // Today: only future times; future day: all times
       const times = s.feedingTimes
         .map((t) => makeDateForTime(t, probe))
         .filter((dt) => i > 0 || dt > now)
@@ -93,75 +100,39 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
     return null
   }
 
-  // Badge values
-  const { dueInMin, missedCount } = useMemo(() => {
-    const now = new Date()
-    let due: number | null = null
-    let missed = 0
+  const toHHMM = (d: Date) => {
+    const h = String(d.getHours()).padStart(2, "0")
+    const m = String(d.getMinutes()).padStart(2, "0")
+    return `${h}:${m}`
+  }
 
-    // Due badge → within next 15 minutes
+  // exact-time FEED badge
+  const feedNow = useMemo(() => {
+    if (!schedule) return false
+    const now = new Date(nowTick)
+    if (!dayMatches(schedule, now)) return false
+    const nowHHMM = toHHMM(now)
+    return schedule.feedingTimes.some((t) => t === nowHHMM)
+  }, [schedule, nowTick])
+
+  // "Due X min" within next 15 min (hidden while feedNow)
+  const dueInMin = useMemo(() => {
+    if (feedNow) return null
+    const now = new Date(nowTick)
     const next = findNextScheduled(schedule, now)
-    if (next) {
-      const ms = next.getTime() - now.getTime()
-      const min = Math.ceil(ms / 60000)
-      if (min > 0 && min <= 15) due = min
-    }
+    if (!next) return null
+    const ms = next.getTime() - now.getTime()
+    const min = Math.ceil(ms / 60000)
+    return min > 0 && min <= 15 ? min : null
+  }, [schedule, nowTick, feedNow])
 
-    // Missed badge → scheduled in last 3 hours with no log within ±60 minutes
-    if (schedule) {
-      const start = new Date(now.getTime() - 3 * 60 * 60 * 1000)
-      const scheduled = enumerateScheduledBetween(schedule, start, now)
-      const TOL = 60 * 60 * 1000 // ±60 min
-      for (const sch of scheduled) {
-        const found = logs.some((l) => Math.abs(l.fedAt.getTime() - sch.getTime()) <= TOL)
-        if (!found) missed += 1
-      }
-    }
-
-    return { dueInMin: due, missedCount: missed }
-  }, [schedule, logs])
+  const mortalityDue = useMemo(() => {
+    if (!lastMortalityDate) return true
+    const days = Math.floor((Date.now() - lastMortalityDate.getTime()) / DAY_MS)
+    return days >= 15
+  }, [lastMortalityDate, nowTick])
 
   if (!pond) return null
-
-  const handleFeedFish = () => setShowFeedingModal(true)
-  const handleGrowthSetup = () => setShowGrowthSetupModal(true)
-  const handleScheduleFeeding = () => setShowScheduleModal(true)
-  const handleMortalityLog = () => setShowMortalityModal(true)
-  const handleExportData = () => {
-    // Placeholder for export data functionality
-    console.log("Export data action triggered")
-  }
-  const handleOpenSettings = () => {
-    router.push(`/settings?pond=${encodeURIComponent(pond.id)}`)
-  }
-
-  // --- Button with non-shrinking, in-tile badge ---
-  const renderFeedButton = () => {
-    const showMissed = missedCount > 0
-    const showDue = !showMissed && dueInMin !== null
-
-    return (
-      <Button
-        variant="outline"
-        className="relative w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
-        onClick={handleFeedFish}
-      >
-        <Fish className="h-6 w-6 text-cyan-600" />
-        <span className="text-sm">Feed Fish</span>
-
-        {showMissed && (
-          <span className="absolute -top-2 -right-2 rounded-full bg-red-600 text-white text-[10px] px-2 py-0.5 shadow">
-            Missed ×{missedCount}
-          </span>
-        )}
-        {showDue && (
-          <span className="absolute -top-2 -right-2 rounded-full bg-amber-500 text-white text-[10px] px-2 py-0.5 shadow">
-            Due {dueInMin}m
-          </span>
-        )}
-      </Button>
-    )
-  }
 
   return (
     <>
@@ -171,53 +142,86 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
           <p className="text-sm text-gray-600">Common pond management tasks</p>
         </CardHeader>
         <CardContent>
-          {/* items-stretch + each Button uses w-full so tiles don't shrink */}
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4 items-stretch">
-            {renderFeedButton()}
-
+            {/* Feed */}
             <Button
               variant="outline"
-              className="w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
-              onClick={handleGrowthSetup}
+              className="relative w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
+              onClick={() => setShowFeedingModal(true)}
+            >
+              <Fish className="h-6 w-6 text-cyan-600" />
+              <span className="text-sm">Feed Fish</span>
+
+              {feedNow && (
+                <span className="absolute -top-2 -right-2 rounded-full bg-green-600 text-white text-[10px] px-2 py-0.5 shadow">
+                  Feed
+                </span>
+              )}
+              {!feedNow && dueInMin !== null && (
+                <span className="absolute -top-2 -right-2 rounded-full bg-amber-500 text-white text-[10px] px-2 py-0.5 shadow">
+                  Due {dueInMin} min
+                </span>
+              )}
+            </Button>
+
+            {/* Growth setup */}
+            <Button
+              variant="outline"
+              className="relative w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
+              onClick={() => setShowGrowthSetupModal(true)}
             >
               <Scale className="h-6 w-6 text-blue-600" />
               <span className="text-sm">Growth Setup</span>
             </Button>
 
+            {/* Schedule feeding */}
             <Button
               variant="outline"
               className="w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
-              onClick={handleScheduleFeeding}
+              onClick={() => setShowScheduleModal(true)}
             >
               <Calendar className="h-6 w-6 text-green-600" />
               <span className="text-sm">Schedule Feed</span>
             </Button>
 
+            {/* Mortality log */}
             <Button
               variant="outline"
-              className="w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
-              onClick={handleMortalityLog}
+              className="relative w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
+              onClick={() => setShowMortalityModal(true)}
             >
               <TrendingDown className="h-6 w-6 text-red-600" />
               <span className="text-sm">Mortality Log</span>
+              {mortalityDue && (
+                <span className="absolute -top-2 -right-2 rounded-full bg-indigo-600 text-white text-[10px] px-2 py-0.5 shadow">
+                  Due
+                </span>
+              )}
             </Button>
 
+            {/* Export */}
             <Button
               variant="outline"
               className="w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
-              onClick={handleExportData}
+              onClick={() => console.log("Export data")}
             >
               <Download className="h-6 w-6 text-purple-600" />
               <span className="text-sm">Export Data</span>
             </Button>
 
+            {/* Settings with red badge if phone missing */}
             <Button
               variant="outline"
-              className="w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
-              onClick={handleOpenSettings}
+              className="relative w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
+              onClick={() => router.push(`/settings?pond=${encodeURIComponent(pond.id)}`)}
             >
               <SettingsIcon className="h-6 w-6 text-orange-600" />
               <span className="text-sm">Settings</span>
+              {hasPhone === false && (
+                <span className="absolute -top-2 -right-2 rounded-full bg-red-600 text-white text-[10px] px-2 py-0.5 shadow">
+                  Add phone
+                </span>
+              )}
             </Button>
           </div>
         </CardContent>
@@ -226,7 +230,6 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
       {/* Modals */}
       <FeedingLogModal isOpen={showFeedingModal} onClose={() => setShowFeedingModal(false)} />
       <FeedingScheduleModal isOpen={showScheduleModal} onClose={() => setShowScheduleModal(false)} pond={pond} />
-
       <MortalityLogModal
         isOpen={showMortalityModal}
         onClose={() => setShowMortalityModal(false)}
@@ -236,7 +239,6 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
           onMortalityUpdate?.()
         }}
       />
-
       <GrowthSetupModal
         isOpen={showGrowthSetupModal}
         onClose={() => setShowGrowthSetupModal(false)}

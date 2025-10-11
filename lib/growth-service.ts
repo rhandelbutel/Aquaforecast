@@ -186,6 +186,11 @@ export class GrowthService {
     return Math.max(0, this.ABW_CADENCE_DAYS - days)
   }
 
+  /** Expose the same rule with a friendlier name for UIs. */
+  static isABWDue(lastABWUpdate: Timestamp | Date | unknown): boolean {
+    return this.canUpdateABW(lastABWUpdate)
+  }
+
   private static async addGrowthHistory(
     pondId: string,
     userId: string,
@@ -207,7 +212,7 @@ export class GrowthService {
     }
   }
 
-  static async getGrowthHistory(pondId: string, userId: string): Promise<GrowthHistory[]> {
+  static async getGrowthHistory(pondId: string): Promise<GrowthHistory[]> {
     try {
       const q = query(collection(db, this.HISTORY_COLLECTION_NAME), where("pondId", "==", pondId))
       const qs = await getDocs(q)
@@ -238,7 +243,7 @@ export class GrowthService {
     })
   }
 
-  static async deleteGrowthSetup(pondId: string, userId: string): Promise<void> {
+  static async deleteGrowthSetup(pondId: string): Promise<void> {
     try {
       const id = `${pondId}`
       const ref = doc(db, this.COLLECTION_NAME, id)
@@ -249,10 +254,13 @@ export class GrowthService {
     }
   }
 
-  static subscribeGrowthSetup(pondId: string, callback: (setup: GrowthSetup | null) => void): () => void {
+  static subscribeGrowthSetup(
+    pondId: string,
+    callback: (setup: GrowthSetup | null) => void
+  ): () => void {
     const id = `${pondId}`
     const ref = doc(db, this.COLLECTION_NAME, id)
-    return onSnapshot(ref, (snap) => {
+    return onSnapshot(ref, (snap: any) => {
       if (snap.exists()) callback({ id, ...snap.data() } as GrowthSetup)
       else callback(null)
     })
