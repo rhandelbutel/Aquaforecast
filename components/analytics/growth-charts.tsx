@@ -56,47 +56,106 @@ function stageRatePerCadence(weightG: number): number {
 }
 
 /**
- * Build predicted series in 15-day steps that:
- *  1) creates a baseline forecast ignoring actuals;
- *  2) if there is a latest actual at period k, re-forecasts ONLY from k+1 onward
- *     starting from that actual value; earlier predicted points remain as originally forecast.
+ * Build a predicted series that dynamically runs forward in 15-day steps
+ * UNTIL the target is reached, so the last point on the chart is the
+ * first fortnight where target is achieved.
+ *
+ * Rules:
+ * - If target is undefined/null -> return a fixed horizon (base + extraAhead).
+ * - If any ACTUAL already >= target -> cut at that actual index (no future forecast).
+ * - Otherwise simulate forward from latest actual (or seed) until >= target.
  */
-function buildPredictedSeries(
+function buildPredictedSeriesDynamic(
   actual: Array<number | null>,
-  seed: number,                 // starting ABW for Period 1 if no actual[0]
-  target: number | null,
-  extraPeriodsAhead = 8
-) {
-  const basePeriods = Math.max(1, actual.length)
-  const periods = basePeriods + extraPeriodsAhead
-  const pred: number[] = new Array(periods)
-  const clamp = (v: number) => (target ? Math.min(target, v) : v)
+  seedForP1: number,
+  target: number | null | undefined,
+  extraAheadIfNoTarget = 8,
+  safetyCap = 200 // just in case target is very large
+): number[] {
+  const baseLen = Math.max(1, actual.length)
 
-  // 1) Baseline forecast (15d increments) that ignores all actuals
-  pred[0] = clamp(Math.max(1, seed))
-  for (let i = 1; i < periods; i++) {
-    const prev = pred[i - 1]
-    pred[i] = clamp(prev + stageRatePerCadence(prev))
+  // Helper to forecast next value
+  const nextVal = (prev: number) => prev + stageRatePerCadence(prev)
+
+  // If target is not provided: produce baseline forecast with a fixed horizon
+  if (target == null || !Number.isFinite(target)) {
+    const len = baseLen + Math.max(0, extraAheadIfNoTarget)
+    const out = new Array<number>(len)
+
+    // seed for period 1
+    out[0] = Math.max(1, seedForP1)
+
+    // fill baseline
+    for (let i = 1; i < len; i++) {
+      const prev = out[i - 1]
+      out[i] = nextVal(prev)
+    }
+
+    // re-forecast forward from latest actual if any, without shortening
+    let latestIdx = -1
+    for (let i = actual.length - 1; i >= 0; i--) if (typeof actual[i] === "number") { latestIdx = i; break }
+    if (latestIdx >= 0) {
+      let w = actual[latestIdx] as number
+      for (let i = latestIdx + 1; i < len; i++) {
+        w = nextVal(w)
+        out[i] = w
+      }
+      // keep out[latestIdx] as baseline so the visual line starts AFTER the actual dot
+    }
+
+    return out
   }
 
-  // 2) Find latest actual and re-forecast ONLY from the next 15-day period onward
+  // If an ACTUAL already hit/exceeded the target, stop the chart there
+  const firstActualHit = actual.findIndex((v) => typeof v === "number" && (v as number) >= target)
+  if (firstActualHit >= 0) {
+    // chart length is just up to that period (inclusive)
+    // For visual clarity, we still return a predicted array up to that length,
+    // but we won’t plot beyond that period.
+    const len = firstActualHit + 1
+    const out = new Array<number>(len)
+    // baseline seed
+    out[0] = Math.max(1, seedForP1)
+    for (let i = 1; i < len; i++) out[i] = nextVal(out[i - 1])
+    // we do not overwrite with actual values here; actuals are plotted separately
+    // The x-axis count will be trimmed by the caller.
+    return out
+  }
+
+  // Otherwise: simulate until the predicted reaches target.
+  // Start from latest actual (if exists) or the seed.
   let latestIdx = -1
-  for (let i = actual.length - 1; i >= 0; i--) {
-    if (typeof actual[i] === "number") {
-      latestIdx = i
-      break
-    }
-  }
-  if (latestIdx >= 0) {
-    let w = actual[latestIdx] as number
-    for (let i = latestIdx + 1; i < periods; i++) {
-      w = clamp(w + stageRatePerCadence(w))
-      pred[i] = w
-    }
-    // NOTE: we intentionally do NOT overwrite pred[latestIdx]
+  for (let i = actual.length - 1; i >= 0; i--) if (typeof actual[i] === "number") { latestIdx = i; break }
+
+  const out: number[] = []
+  // Ensure array covers at least existing actual periods
+  const startLen = Math.max(1, baseLen)
+  out.length = startLen
+  // seed baseline up to current length
+  out[0] = Math.max(1, seedForP1)
+  for (let i = 1; i < startLen; i++) out[i] = nextVal(out[i - 1])
+
+  // If there is a latest actual, re-forecast forward from there
+  let w = latestIdx >= 0 ? (actual[latestIdx] as number) : out[startLen - 1]
+  let i = Math.max(latestIdx + 1, startLen)
+
+  // Grow forward until hitting the target (or safety cap)
+  let steps = 0
+  while (steps < safetyCap && w < target) {
+    w = nextVal(w)
+    out.push(w)
+    steps++
   }
 
-  return pred
+  // Cap the final value EXACTLY at target for the last point
+  if (out.length > 0) {
+    if (out[out.length - 1] >= target) out[out.length - 1] = target
+  } else {
+    // edge: no out? (shouldn’t happen) fall back to one point at target
+    out.push(target)
+  }
+
+  return out
 }
 
 interface GrowthChartsProps {
@@ -111,7 +170,7 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
   const [mortLogs, setMortLogs] = useState<MortalityLog[]>([])
   const initialStocked = pond.fishCount || 0
 
-  // growth setup
+  // growth setup (kept; doesn’t affect empty-state rule)
   const [currentABW, setCurrentABW] = useState<number | null>(null)
   const [targetWeight, setTargetWeight] = useState<number | null>(null)
 
@@ -148,6 +207,8 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
     }
   }, [sharedPondId])
 
+  const hasHistory = history.length > 0
+
   // Estimated alive = survival% * initial
   const estimatedAlive = useMemo(() => {
     if (typeof survivalPct === "number") {
@@ -172,17 +233,39 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
     currentABW ??
     5
 
-  // Predicted ABW series
+  // Predicted ABW series (dynamic horizon)
   const predictedSeries = useMemo(() => {
+    if (!hasHistory) return []
     const actualOnly = actualSeries.map((a) => a.actual)
-    return buildPredictedSeries(actualOnly, seedForP1, targetWeight ?? null, 8)
-  }, [actualSeries, seedForP1, targetWeight])
+    return buildPredictedSeriesDynamic(actualOnly, seedForP1, targetWeight, 8)
+  }, [hasHistory, actualSeries, seedForP1, targetWeight])
 
-  // Merge for ABW chart
+  // Decide the final number of fortnights to render:
+  // - If target exists & was reached by prediction, cut at that last predicted point.
+  // - If an actual already >= target, cut at that actual period.
+  // - Else, render max of actual vs predicted arrays (fallback).
   const chartData = useMemo(() => {
-    const maxPts = Math.max(actualSeries.length, predictedSeries.length)
+    if (!hasHistory) return []
+
+    // If target provided, find first period where either:
+    //  A) actual >= target (stop there), or
+    //  B) predicted (dynamic) last index — already capped to target.
+    let endLen: number | null = null
+
+    if (targetWeight != null && Number.isFinite(targetWeight)) {
+      const firstActualHit = actualSeries.findIndex((p) => (p.actual ?? -Infinity) >= (targetWeight as number))
+      if (firstActualHit >= 0) {
+        endLen = firstActualHit + 1
+      } else {
+        // predictedSeriesDynamic already ended at target — so render its full length
+        endLen = Math.max(actualSeries.length, predictedSeries.length)
+      }
+    }
+
+    const finalLen = endLen ?? Math.max(actualSeries.length, predictedSeries.length)
     const rows: { label: string; actual: number | null; predicted: number | null }[] = []
-    for (let i = 0; i < maxPts; i++) {
+
+    for (let i = 0; i < finalLen; i++) {
       rows.push({
         label: `Fortnight ${i + 1}`,
         actual: i < actualSeries.length ? actualSeries[i].actual : null,
@@ -190,11 +273,10 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
       })
     }
     return rows
-  }, [actualSeries, predictedSeries])
+  }, [hasHistory, actualSeries, predictedSeries, targetWeight])
 
-  // ---- Survival Rate Curve data (replaces FCE chart) ----
+  // ---- Survival Rate Curve data (unchanged) ----
   const survivalCurveData = useMemo(() => {
-    // logs from subscribeMortalityLogs are sorted desc; make chronological
     const chrono = [...mortLogs].sort((a, b) => {
       const ta = a.date instanceof Date ? a.date.getTime() : new Date(a.date as any).getTime()
       const tb = b.date instanceof Date ? b.date.getTime() : new Date(b.date as any).getTime()
@@ -204,25 +286,19 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
     const rows: { label: string; survival: number }[] = []
     let cumulativeMortality = 0
 
-    // optional starting point at 100%
     if (chrono.length === 0) {
       rows.push({ label: "Start", survival: 100 })
       return rows
     }
 
-    rows.push({
-      label: "Start",
-      survival: 100,
-    })
+    rows.push({ label: "Start", survival: 100 })
 
     for (const log of chrono) {
       const add = typeof log.mortalityRate === "number" ? Math.max(0, Math.min(100, log.mortalityRate)) : 0
       cumulativeMortality = Math.min(100, cumulativeMortality + add)
       const survival = Math.max(0, 100 - cumulativeMortality)
-
       const d = log.date instanceof Date ? log.date : new Date(log.date as any)
       const label = d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
-
       rows.push({ label, survival })
     }
 
@@ -231,7 +307,7 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      {/* Fish Growth Prediction (actual + predicted overlay) */}
+      {/* Fish Growth Prediction (blank if no history) */}
       <Card>
         <CardHeader>
           <CardTitle>Fish Growth Prediction - {pond.name}</CardTitle>
@@ -245,8 +321,10 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
           </p>
         </CardHeader>
         <CardContent>
-          {seedForP1 == null ? (
-            <div className="text-sm text-gray-500">Add an ABW to see predictions.</div>
+          {!hasHistory ? (
+            <div className="text-sm text-gray-500">
+              No growth measurements recorded yet. Add your first ABW in <b>Growth Setup</b> to see predictions.
+            </div>
           ) : (
             <ResponsiveContainer width="100%" height={320}>
               <LineChart data={chartData}>
@@ -286,7 +364,7 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
         </CardContent>
       </Card>
 
-      {/* Survival Rate Curve (replaces FCE chart, keeps design) */}
+      {/* Survival Rate Curve */}
       <Card>
         <CardHeader>
           <CardTitle>Survival Rate Curve - {pond.name}</CardTitle>
@@ -300,9 +378,7 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="label" />
               <YAxis domain={[0, 100]} />
-              <Tooltip
-                formatter={(value: any) => [`${Number(value).toFixed(1)}%`, "Survival"]}
-              />
+              <Tooltip formatter={(value: any) => [`${Number(value).toFixed(1)}%`, "Survival"]} />
               <Area
                 type="monotone"
                 dataKey="survival"
