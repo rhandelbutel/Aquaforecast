@@ -107,7 +107,7 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
     const list: AlertItem[] = []
     const now = new Date()
 
-    // Offline alert → store as "error" (shown as danger)
+    // Offline alert → store as "error"
     if (!isOnline || error) {
       list.push({
         id: "sensor-offline",
@@ -145,12 +145,11 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
       } else {
         list.push({
           id: `sensor-${key}-error`,
-          type: "error", // stored as error, shown as "danger" badge text
+          type: "error",
           title: `${label} dangerously ${dir}`,
           message: `${label} is ${pretty}. Optimal ${range.label}.`,
           when: now,
           severity: "high",
-          
         })
       }
     }
@@ -227,8 +226,9 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
     }
   }
 
-  // Map stored type → badge label text the way you want to see it
-  const badgeLabel = (type: AlertType) => (type === "error" ? "danger" : "warning")
+  // Map stored type → badge label text.
+  // ✅ Show "error" (not "danger") for offline and other errors.
+  const badgeLabel = (type: AlertType) => (type === "error" ? "error" : "warning")
 
   return (
     <Card>
