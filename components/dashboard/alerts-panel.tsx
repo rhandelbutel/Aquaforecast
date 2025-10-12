@@ -231,6 +231,7 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
   const badgeLabel = (type: AlertType) => (type === "error" ? "error" : "warning")
 
   return (
+    <div id="export-alerts" className="w-full">
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between">
@@ -283,5 +284,6 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
         )}
       </CardContent>
     </Card>
+    </div>
   )
 }

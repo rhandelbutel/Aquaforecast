@@ -223,6 +223,7 @@ export function HarvestPredictionDashboard({
       : { text: "Early Growth Phase", color: "bg-gray-100 text-gray-800" }
 
   return (
+    <div id="export-harvest" className="w-full">
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -373,6 +374,7 @@ export function HarvestPredictionDashboard({
           </div>
         </CardContent>
       </Card>
+    </div>
     </div>
   )
 }

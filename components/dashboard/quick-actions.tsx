@@ -11,6 +11,7 @@ import { FeedingScheduleModal } from "@/components/feeding/feeding-schedule-moda
 import { FeedingLogModal } from "@/components/feeding/feeding-log-modal"
 import { MortalityLogModal } from "@/components/mortality/mortality-log-modal"
 import { GrowthSetupModal } from "@/components/growth/growth-setup-modal"
+import ExportModal from "@/components/export/export-modal" // 👈 NEW
 
 import type { UnifiedPond } from "@/lib/pond-context"
 import { feedingScheduleService, type FeedingSchedule } from "@/lib/feeding-schedule-service"
@@ -34,6 +35,7 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
   const [showScheduleModal, setShowScheduleModal] = useState(false)
   const [showMortalityModal, setShowMortalityModal] = useState(false)
   const [showGrowthSetupModal, setShowGrowthSetupModal] = useState(false)
+  const [showExportModal, setShowExportModal] = useState(false) // 👈 NEW
 
   const sharedPondId = (pond as any)?.adminPondId || pond?.id
 
@@ -203,7 +205,7 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
             <Button
               variant="outline"
               className="w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
-              onClick={() => console.log("Export data")}
+              onClick={() => setShowExportModal(true)} // 👈 NEW
             >
               <Download className="h-6 w-6 text-purple-600" />
               <span className="text-sm">Export Data</span>
@@ -248,6 +250,13 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
           setShowGrowthSetupModal(false)
         }}
         onSuccess={() => setShowGrowthSetupModal(false)}
+      />
+
+      {/* Export Modal 👇 NEW */}
+      <ExportModal
+        open={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        pond={pond}
       />
     </>
   )

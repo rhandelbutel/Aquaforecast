@@ -178,6 +178,7 @@ export function DashboardWithPonds() {
         {selectedPond ? (
           <>
             {/* Current Pond Info */}
+            <div id="export-pond-summary" className="w-full">
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
@@ -211,8 +212,10 @@ export function DashboardWithPonds() {
                 </div>
               </CardContent>
             </Card>
+            </div>
 
             {/* Real-time Sensor Data */}
+            <div id="export-realtime" className="w-full">
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center">
@@ -308,6 +311,7 @@ export function DashboardWithPonds() {
 
               </CardContent>
             </Card>
+            </div>
 
 
 
