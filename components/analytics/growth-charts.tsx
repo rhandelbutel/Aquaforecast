@@ -331,12 +331,13 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="label" />
                 <YAxis />
-                <Tooltip
-                  formatter={(value: any, name) => [
-                    typeof value === "number" ? `${value.toFixed(1)} g` : value,
-                    name === "actual" ? "Actual ABW" : "Predicted ABW",
+               <Tooltip
+                  formatter={(value, name) => [
+                    typeof value === "number" ? `${value.toFixed(2)} g` : value,
+                    String(name), 
                   ]}
                 />
+
                 {/* Actual line */}
                 <Line
                   type="monotone"
