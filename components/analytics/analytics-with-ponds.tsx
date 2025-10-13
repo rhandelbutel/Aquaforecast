@@ -1,3 +1,4 @@
+// components/analytics/analytics-with-ponds.tsx
 "use client"
 
 import { AnalyticsExport } from "./analytics-export"
@@ -5,13 +6,12 @@ import { HarvestForecast } from "./harvest-forecast"
 import { FeedingHistory } from "./feeding-history"
 import { GrowthCharts } from "./growth-charts"
 import { EfficiencyTips } from "@/components/analytics/efficiency-tips"
+import { AnalyticsSummaryExport } from "./analytics-summary-export"   // ✅ NEW
 import type { UnifiedPond } from "@/lib/pond-context"
 
 interface AnalyticsWithPondsProps {
-  ponds: UnifiedPond[] // Admin & User share the same ids
+  ponds: UnifiedPond[]
 }
-
-// ...imports unchanged...
 
 export function AnalyticsWithPonds({ ponds }: AnalyticsWithPondsProps) {
   return (
@@ -31,7 +31,14 @@ export function AnalyticsWithPonds({ ponds }: AnalyticsWithPondsProps) {
             <HarvestForecast pond={pond as any} />
             <FeedingHistory pond={pond as any} />
             <GrowthCharts pond={pond as any} />
-            <EfficiencyTips pond={pond as any} />
+
+            {/* 👇 Still visible on screen, but hidden only in PDF export */}
+            <div data-export-hide>
+              <EfficiencyTips pond={pond as any} />
+            </div>
+
+            {/* 👇 Hidden component that renders the export-only summary table per pond */}
+            <AnalyticsSummaryExport pond={pond as any} />
           </div>
         ))}
       </div>
