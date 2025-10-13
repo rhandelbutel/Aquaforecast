@@ -23,17 +23,20 @@ import {
 import { GrowthService, type GrowthHistory } from "@/lib/growth-service"
 
 /* --------------------------------------------
-   Stage-based Nile Tilapia growth model
+   Stage-based Tilapia growth model
    -------------------------------------------- */
 type GrowthStage = { from: number; to: number | null; rate: number } // rate = g/week
 
 // Typical weekly gains by stage (g/week)
 const TILAPIA_STAGES: GrowthStage[] = [
-  { from: 1,   to: 20,   rate: 4.5 },
-  { from: 20,  to: 100,  rate: 14 },
-  { from: 100, to: 300,  rate: 25 },
-  { from: 300, to: 600,  rate: 37.5 },
-  { from: 600, to: null, rate: 37.5 },
+   { from: 1,   to: 15,   rate: 4.0 },   
+  { from: 16,  to: 30,   rate: 13.0 },
+  { from: 31,  to: 45,   rate: 16.5 },
+  { from: 46,  to: 60,   rate: 20.5 },
+  { from: 61,  to: 75,   rate: 21.5 },
+  { from: 76,  to: 90,   rate: 22.0 },  
+  { from: 91,  to: 105,  rate: 18.0 },
+  { from: 106, to: null, rate: 12.0 },
 ]
 
 // ---- Cadence: every 15 days ----

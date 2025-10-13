@@ -1,10 +1,10 @@
-"use client";
+'use client';
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 
 export type SensorJson = {
   device: string;
-  ts: number;   // ESP32 millis (approx)
+  ts: number;   // millis since boot
   temp: number; // °C
   ph: number;
   tds: number;  // ppm
@@ -13,8 +13,9 @@ export type SensorJson = {
 };
 
 type Options = {
-  baseUrl?: string;     // "http://aquamon.local" or "/api"
+  baseUrl?: string;     // e.g. "http://aquamon.local" or "/api"
   intervalMs?: number;  // polling interval
+  // ⛔️ no function props; use setOnReading below
 };
 
 export function useAquaSensors(opts: Options = {}) {
@@ -27,6 +28,12 @@ export function useAquaSensors(opts: Options = {}) {
 
   const timerRef = useRef<number | null>(null);
   const backoffRef = useRef<number>(intervalMs);
+
+  // keep an optional callback without making it a prop
+  const onReadingRef = useRef<((r: SensorJson) => void) | undefined>(undefined);
+  const setOnReading = useCallback((cb?: (r: SensorJson) => void) => {
+    onReadingRef.current = cb;
+  }, []);
 
   useEffect(() => {
     let aborted = false;
@@ -48,6 +55,9 @@ export function useAquaSensors(opts: Options = {}) {
           setIsOnline(true);
           setError(null);
           backoffRef.current = intervalMs;
+
+          // call optional listener
+          onReadingRef.current?.(json);
         }
       } catch (e: any) {
         if (!aborted) {
@@ -70,5 +80,5 @@ export function useAquaSensors(opts: Options = {}) {
     };
   }, [baseUrl, intervalMs]);
 
-  return { data, error, isOnline };
+  return { data, error, isOnline, setOnReading };
 }

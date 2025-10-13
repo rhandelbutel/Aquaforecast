@@ -1,147 +1,151 @@
 // components/analytics/efficiency-tips.tsx
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Lightbulb, TrendingUp, AlertCircle } from 'lucide-react'
-import { PondData } from '@/lib/pond-service'
+"use client";
 
-interface EfficiencyTipsProps {
-  pond: PondData
-}
+import { useEffect, useMemo, useState } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { AlertTriangle, Info, XCircle } from "lucide-react";
+import type { PondData } from "@/lib/pond-service";
 
-  const generateTips = (pond: PondData) => {
-  const tips = []
-  const stockingDensity = pond.fishCount / pond.area
+import {
+  detectRealtimeFindings, detectMortality, detectGrowthDelta, detectOffline,
+  subscribeInsights, resolveInsight, snoozeInsight, recordHeartbeat,
+  type Insight
+} from "@/lib/insights-service";
 
-  // Feeding frequency tips
-  if (pond.feedingFrequency < 2) {
-    tips.push({
-      type: 'optimization',
-      title: 'Increase Feeding Frequency',
-      description: `Consider feeding ${pond.fishSpecies} 2-3 times daily for better growth rates`,
-      impact: 'High',
-      pond: pond.name
-    })
-  } else if (pond.feedingFrequency > 4) {
-    tips.push({
-      type: 'alert',
-      title: 'Reduce Feeding Frequency',
-      description: 'Overfeeding can lead to water quality issues and waste',
-      impact: 'Medium',
-      pond: pond.name
-    })
-  }
+import { useAquaSensors } from "@/hooks/useAquaSensors";
 
-  // Stocking density tips
-  if (stockingDensity > 5) {
-    tips.push({
-      type: 'alert',
-      title: 'High Stocking Density',
-      description: `Current density: ${stockingDensity.toFixed(1)} fish/m². Consider reducing to improve growth`,
-      impact: 'High',
-      pond: pond.name
-    })
-  } else if (stockingDensity < 1) {
-    tips.push({
-      type: 'insight',
-      title: 'Low Stocking Density',
-      description: `Pond capacity underutilized. Current: ${stockingDensity.toFixed(1)} fish/m²`,
-      impact: 'Medium',
-      pond: pond.name
-    })
-  }
+type Props = { pond: PondData & { id: string } };
 
-  // Species-specific tips
-  if (pond.fishSpecies === 'Tilapia') {
-    tips.push({
-      type: 'optimization',
-      title: 'Optimal Temperature for Tilapia',
-      description: 'Maintain water temperature between 26-30°C for best growth rates',
-      impact: 'Medium',
-      pond: pond.name
-    })
-  } else if (pond.fishSpecies === 'Catfish') {
-    tips.push({
-      type: 'insight',
-      title: 'Catfish Growth Optimization',
-      description: 'Catfish grow well in slightly warmer water (24-28°C) with good aeration',
-      impact: 'Medium',
-      pond: pond.name
-    })
-  }
+const iconFor = (sev: Insight["severity"]) =>
+  sev === "danger" || sev === "error" ? XCircle
+  : sev === "warning" ? AlertTriangle
+  : Info;
 
-  // Default tip if no specific recommendations
-  if (tips.length === 0) {
-    tips.push({
-      type: 'insight',
-      title: 'Optimal Conditions Maintained',
-      description: `${pond.name} shows good feeding frequency and stocking density for ${pond.fishSpecies}`,
-      impact: 'Low',
-      pond: pond.name
-    })
-  }
+const badgeFor = (sev: Insight["severity"]) =>
+  sev === "danger" || sev === "error" ? "bg-red-100 text-red-800"
+  : sev === "warning" ? "bg-yellow-100 text-yellow-800"
+  : "bg-blue-100 text-blue-800";
 
-  return tips
-}
+export function EfficiencyTips({ pond }: Props) {
+  const [items, setItems] = useState<Insight[]>([]);
 
-const getTypeIcon = (type: string) => {
-  switch (type) {
-    case 'optimization': return Lightbulb
-    case 'alert': return AlertCircle
-    case 'insight': return TrendingUp
-    default: return Lightbulb
-  }
-}
+  // 1) Subscribe to stored insights for this pond
+  useEffect(() => {
+    if (!pond?.id) return;
+    return subscribeInsights(pond.id, setItems);
+  }, [pond?.id]);
 
-const getTypeColor = (type: string) => {
-  switch (type) {
-    case 'optimization': return 'text-green-600'
-    case 'alert': return 'text-yellow-600'
-    case 'insight': return 'text-blue-600'
-    default: return 'text-gray-600'
-  }
-}
+  // 2) Stream sensors → detectors + heartbeat
+  //    NOTE: use returned setOnReading (no function prop in options)
+  const { setOnReading } = useAquaSensors({ baseUrl: "/api", intervalMs: 1000 });
 
-const getImpactColor = (impact: string) => {
-  switch (impact) {
-    case 'High': return 'bg-red-100 text-red-800'
-    case 'Medium': return 'bg-yellow-100 text-yellow-800'
-    case 'Low': return 'bg-green-100 text-green-800'
-    default: return 'bg-gray-100 text-gray-800'
-  }
-}
+  useEffect(() => {
+    if (!pond?.id) return;
 
-export function EfficiencyTips({ pond }: EfficiencyTipsProps) {
-  const tips = generateTips(pond)
+    setOnReading(async (r) => {
+      await recordHeartbeat(pond.id);
+      await detectRealtimeFindings(
+        { id: pond.id, name: pond.name, fishSpecies: pond.fishSpecies },
+        { ts: r.ts, temp: r.temp, ph: r.ph, tds: r.tds, do: r.do }
+      );
+    });
+
+    // cleanup: stop calling when component/pond changes
+    return () => setOnReading(undefined);
+  }, [pond?.id, pond?.name, pond?.fishSpecies, setOnReading]);
+
+  // 3) Periodic checks for mortality / growth delta / offline sweep
+  useEffect(() => {
+    if (!pond?.id) return;
+    let stop = false;
+
+    const run = async () => {
+      try {
+        await Promise.all([
+          detectMortality({ id: pond.id, name: pond.name }),
+          detectGrowthDelta({ id: pond.id, name: pond.name }),
+          detectOffline({ id: pond.id, name: pond.name }),
+        ]);
+      } finally {
+        if (!stop) setTimeout(run, 5 * 60 * 1000); // every 5 min
+      }
+    };
+
+    run();
+    return () => { stop = true; };
+  }, [pond?.id, pond?.name]);
+
+  // 4) Sort & trim (danger > error > warning > info; newest first)
+  const display = useMemo(() => {
+    const rank = (s: Insight["severity"]) =>
+      s === "danger" ? 3 : s === "error" ? 2 : s === "warning" ? 1 : 0;
+
+    const filtered = items.filter(i => i.status === "active");
+    return filtered
+      .slice()
+      .sort((a, b) => (rank(b.severity) - rank(a.severity)) || (b.createdAt - a.createdAt))
+      .slice(0, 6);
+  }, [items]);
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Efficiency Tips & Alerts - {pond.name}</CardTitle>
+        <CardTitle>Efficiency Tips & Alerts — {pond.name}</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="space-y-4">
-          {tips.map((tip, index) => {
-            const Icon = getTypeIcon(tip.type)
-            return (
-              <div key={index} className="flex items-start space-x-3 p-4 border rounded-lg">
-                <Icon className={`h-5 w-5 mt-0.5 ${getTypeColor(tip.type)}`} />
-                <div className="flex-1">
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="font-medium text-gray-900">{tip.title}</h3>
-                    <div className="flex items-center space-x-2">
-                      <Badge className={getImpactColor(tip.impact)}>
-                        {tip.impact} Impact
-                      </Badge>
-                      <Badge variant="outline">{tip.pond}</Badge>
+        {display.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No active alerts. Tips will appear as we capture more data.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            {display.map((it) => {
+              const Icon = iconFor(it.severity);
+              const color =
+                it.severity === "danger" || it.severity === "error"
+                  ? "text-red-600"
+                  : it.severity === "warning"
+                  ? "text-yellow-600"
+                  : "text-blue-600";
+
+              return (
+                <div key={it.id ?? it.key} className="flex items-start gap-3 p-4 border rounded-lg">
+                  <Icon className={`h-5 w-5 mt-0.5 ${color}`} />
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-medium">{it.title}</h3>
+                      <Badge className={badgeFor(it.severity)}>{it.severity}</Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-1">{it.message}</p>
+
+                    {it.suggestedAction && (
+                      <p className="text-xs mt-2">
+                        <span className="font-medium">Do this:</span> {it.suggestedAction}
+                      </p>
+                    )}
+
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        className="text-xs px-2 py-1 border rounded hover:bg-muted"
+                        onClick={() => it.id && snoozeInsight(pond.id!, it.id)}
+                      >
+                        Snooze 6h
+                      </button>
+                      <button
+                        className="text-xs px-2 py-1 border rounded hover:bg-muted"
+                        onClick={() => it.id && resolveInsight(pond.id!, it.id)}
+                      >
+                        Resolve
+                      </button>
                     </div>
                   </div>
-                  <p className="text-sm text-gray-600">{tip.description}</p>
                 </div>
-              </div>
-            )
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </CardContent>
     </Card>
-  )
+  );
 }
