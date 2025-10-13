@@ -56,7 +56,7 @@ export function AIInsightsCard({ pondId }: { pondId: string }) {
       <CardHeader>
         <CardTitle className="text-lg flex items-center">
           <Lightbulb className="h-5 w-5 mr-2 text-yellow-600" />
-          AI Insights & Recommendations
+          Insights & Recommendations
         </CardTitle>
       </CardHeader>
       <CardContent>

@@ -1,14 +1,16 @@
-//components/analytics/feeding-history.tsx
+// components/analytics/feeding-history.tsx
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { History, Fish, TrendingUp, Clock, Calendar, Eye, User } from "lucide-react"
+import { History, Fish, TrendingUp, Clock, Calendar, Eye, User, Download } from "lucide-react"
 import { getFeedingLogsByPond, subscribeFeedingLogs, type FeedingLog } from "@/lib/feeding-service"
 import type { UnifiedPond } from "@/lib/pond-context"
+import { useAuth } from "@/lib/auth-context"
+import { captureById, buildPdfSinglePageFromImages, niceNow } from "@/lib/export-utils"
 
 interface FeedingHistoryProps {
   pond: UnifiedPond
@@ -20,6 +22,8 @@ export function FeedingHistory({ pond }: FeedingHistoryProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [selectedLog, setSelectedLog] = useState<FeedingLog | null>(null)
   const [stats, setStats] = useState({ totalLogs: 0, todayCount: 0, averagePerDay: 0 })
+  const exportRef = useRef<HTMLDivElement>(null)
+  const { user } = useAuth()
 
   // unified/shared pond id (same for admin & user)
   const sharedId = (pond as any).adminPondId || pond.id
@@ -68,6 +72,32 @@ export function FeedingHistory({ pond }: FeedingHistoryProps) {
     const avg = Math.round((recent.length / 30) * 10) / 10
     setStats({ totalLogs: feedingLogs.length, todayCount, averagePerDay: avg })
   }, [feedingLogs])
+
+const handleExport = async () => {
+  const node = exportRef.current
+  if (!node) return
+
+  // Temporarily render the hidden section off-screen for capture
+  const prevClass = node.className
+  node.className = prevClass.replace(/\bhidden\b/g, "") + " fixed -left-[10000px] top-0 z-[-1]"
+  await new Promise((r) => setTimeout(r, 30)) // allow layout/paint
+
+  // Capture
+  const dataUrl = await captureById("feeding-history-export")
+
+  // Restore original classes no matter what
+  node.className = prevClass
+  if (!dataUrl) return
+
+  // Build PDF with your standard header/footer
+  await buildPdfSinglePageFromImages({
+    images: [{ title: "", dataUrl }],
+    fileName: `Feeding_History_${(pond as any).name || "Pond"}_${niceNow()}.pdf`,
+    footer: { email: user?.email ?? "" },
+    headerBrand: "AQUAFORECAST",
+  })
+}
+
 
   return (
     <>
@@ -120,7 +150,7 @@ export function FeedingHistory({ pond }: FeedingHistoryProps) {
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm flex items-center gap-2">
                   <TrendingUp className="h-4 w-4 text-purple-600" />
-                  ML Insights
+                  Key Data Insights
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -133,7 +163,7 @@ export function FeedingHistory({ pond }: FeedingHistoryProps) {
                   ) : (
                     <>
                       <Badge variant="outline">{feedingLogs.length}/10 logs needed</Badge>
-                      <p className="mt-2">Keep logging feedings to unlock AI-powered insights and recommendations.</p>
+                      <p className="mt-2">Keep logging feedings to unlock data-driven insights and recommendations.</p>
                     </>
                   )}
                 </div>
@@ -145,23 +175,7 @@ export function FeedingHistory({ pond }: FeedingHistoryProps) {
               <CardHeader><CardTitle className="text-lg">Recent Feeding Logs</CardTitle></CardHeader>
               <CardContent>
                 {isLoading ? (
-                  <div className="space-y-3">
-                    {[1,2,3,4,5].map(i => (
-                      <div key={i} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg animate-pulse">
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 bg-gray-200 rounded-full" />
-                          <div>
-                            <div className="w-24 h-4 bg-gray-200 rounded mb-1" />
-                            <div className="w-32 h-3 bg-gray-200 rounded" />
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <div className="w-16 h-4 bg-gray-200 rounded mb-1" />
-                          <div className="w-12 h-3 bg-gray-200 rounded" />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                  <div className="text-center py-8 text-gray-500">Loading…</div>
                 ) : feedingLogs.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
                     <Fish className="h-12 w-12 mx-auto mb-4 text-gray-300" />
@@ -169,33 +183,36 @@ export function FeedingHistory({ pond }: FeedingHistoryProps) {
                     <p className="text-sm">Start logging feedings to track your pond&apos;s feeding history</p>
                   </div>
                 ) : (
-                  <div className="space-y-3 max-h-96 overflow-y-auto">
-                    {feedingLogs.map((log) => (
-                      <div key={log.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                        <div className="flex items-center gap-3">
-                          <div className="p-2 bg-cyan-100 rounded-full">
-                            <Fish className="h-4 w-4 text-cyan-600" />
-                          </div>
-                          <div>
-                            <div className="font-medium">Feeding Session</div>
-                            <div className="text-sm text-gray-500 flex items-center gap-2">
-                              <Calendar className="h-3 w-3" />
-                              {formatDate(log.fedAt)}
+                  <>
+                    <div className="space-y-3 max-h-96 overflow-y-auto">
+                      {feedingLogs.map((log) => (
+                        <div key={log.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 bg-cyan-100 rounded-full">
+                              <Fish className="h-4 w-4 text-cyan-600" />
+                            </div>
+                            <div>
+                              <div className="font-medium">Feeding Session</div>
+                              <div className="text-sm text-gray-500 flex items-center gap-2">
+                                <Calendar className="h-3 w-3" />
+                                {formatDate(log.fedAt)}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-sm font-medium flex items-center gap-1">
-                            <Clock className="h-3 w-3" />{formatTime(log.fedAt)}
+                          <div className="text-right">
+                            <div className="text-sm font-medium flex items-center gap-1">
+                              <Clock className="h-3 w-3" />{formatTime(log.fedAt)}
+                            </div>
+                            <div className="text-xs text-gray-500">{formatTimeAgo(log.fedAt)}</div>
+                            <Button variant="ghost" size="sm" className="mt-2 px-2" onClick={() => setSelectedLog(log)}>
+                              <Eye className="h-4 w-4 text-cyan-600" />
+                            </Button>
                           </div>
-                          <div className="text-xs text-gray-500">{formatTimeAgo(log.fedAt)}</div>
-                          <Button variant="ghost" size="sm" className="mt-2 px-2" onClick={() => setSelectedLog(log)}>
-                            <Eye className="h-4 w-4 text-cyan-600" />
-                          </Button>
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+
+                  </>
                 )}
               </CardContent>
             </Card>
@@ -234,6 +251,47 @@ export function FeedingHistory({ pond }: FeedingHistoryProps) {
           )}
         </DialogContent>
       </Dialog>
+
+{/* 🔒 Hidden TABLE for export (centered content) */}
+<div
+  id={`feeding-history-export-${sharedId}`}
+  data-export="feeding-history"
+  ref={exportRef}
+  className="hidden p-6 bg-white text-gray-800"
+  style={{ width: 720 }} // crisp on A4
+>
+  <h2 className="text-center text-lg font-bold mb-1">AQUAFORECAST</h2>
+  <p className="text-center text-sm mb-4">Feeding History — {pond.name}</p>
+
+  <div className="mx-auto max-w-[720px]">
+    <table className="w-full border-collapse border border-gray-300 text-center text-sm">
+      <thead className="bg-gray-100">
+        <tr>
+          <th className="border border-gray-300 p-2">Date</th>
+          <th className="border border-gray-300 p-2">Time</th>
+          <th className="border border-gray-300 p-2">Feed Given</th>
+          <th className="border border-gray-300 p-2">Logged By</th>
+        </tr>
+      </thead>
+      <tbody>
+        {feedingLogs.map((log) => (
+          <tr key={log.id}>
+            <td className="border border-gray-300 p-2">{formatDate(log.fedAt)}</td>
+            <td className="border border-gray-300 p-2">{formatTime(log.fedAt)}</td>
+            <td className="border border-gray-300 p-2">
+              {typeof log.feedGiven === "number" ? `${log.feedGiven} ${log.feedUnit ?? "g"}` : "N/A"}
+            </td>
+            <td className="border border-gray-300 p-2">
+              {log.userDisplayName || log.userEmail || "—"}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+  {/* Footer texts are added by export-utils in the PDF */}
+</div>
+
     </>
   )
 }
