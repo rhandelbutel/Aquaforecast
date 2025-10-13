@@ -1,4 +1,3 @@
-// components/feeding/feeding-log-modal.tsx
 "use client"
 
 import type React from "react"
@@ -17,6 +16,7 @@ import { addFeedingLog, subscribeFeedingLogs, type FeedingLog } from "@/lib/feed
 import { feedingScheduleService, type FeedingSchedule } from "@/lib/feeding-schedule-service"
 import { GrowthService } from "@/lib/growth-service"
 import { getMortalityLogs, computeSurvivalRateFromLogs } from "@/lib/mortality-service"
+import { pushFeedingVarianceInsight } from "@/lib/dash-insights-service"
 
 /* ---- Time helpers (Asia/Manila) ---- */
 const TZ = "Asia/Manila"
@@ -210,6 +210,17 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
         autoLogged: false,
         reason: "manual",
       })
+
+      // ⬇️ NEW: push a 5-min deviation insight (needs suggested amount too)
+      try {
+        await pushFeedingVarianceInsight(
+          sharedPondId,
+          selectedPond.name,
+          grams,
+          perFeedingGrams ?? null
+        )
+      } catch {}
+
       setSuccess("Feeding logged successfully!")
       setTimeout(() => {
         onSuccess?.()

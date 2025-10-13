@@ -11,6 +11,7 @@ import { GrowthService, type GrowthSetup, type GrowthHistory } from "@/lib/growt
 import { useAuth } from "@/lib/auth-context"
 import { useToast } from "@/hooks/use-toast"
 import type { UnifiedPond } from "@/lib/pond-context"
+import { pushABWLoggedInsight } from "@/lib/dash-insights-service"
 
 interface GrowthSetupModalProps {
   isOpen: boolean
@@ -193,6 +194,10 @@ export function GrowthSetupModal({
     ) {
       const success = await handleUpdateTargetWeight(target)
       if (success) {
+        /* NEW: transient ABW insight on target-only change */
+        if (!isNaN(target) && target > 0) {
+          try { await pushABWLoggedInsight(sharedPondId, existingSetup.currentABW, target) } catch {}
+        }
         onSuccess?.()
         onClose()
       }
@@ -218,6 +223,15 @@ export function GrowthSetupModal({
         abw,
         !existingSetup
       )
+
+      // Push the 5-min dashboard tip (uses target if provided)
+      try {
+        await pushABWLoggedInsight(
+          sharedPondId,
+          abw,
+          isNaN(target) || target <= 0 ? undefined : target
+        )
+      } catch {}
 
       toast({
         title: "Success",

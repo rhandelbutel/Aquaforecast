@@ -11,6 +11,11 @@ import { GrowthService, type GrowthHistory } from "@/lib/growth-service"
 import { subscribeMortalityLogs, computeSurvivalRateFromLogs, type MortalityLog } from "@/lib/mortality-service"
 import { useAuth } from "@/lib/auth-context"
 
+/* >>> NEW: AI insights renderer + sensor hook + dash-only detector <<< */
+import { AIInsightsCard } from "@/components/dashboard/ai-insights"
+import { useAquaSensors } from "@/hooks/useAquaSensors"
+import { detectRealtimeFindingsDash, type LiveReading } from "@/lib/dash-insights-service"
+
 /* ============================
    Stage-based Tilapia Model (same rates you use in charts)
    ============================ */
@@ -18,11 +23,14 @@ import { useAuth } from "@/lib/auth-context"
 type GrowthStage = { from: number; to: number | null; rate: number } // rate in g/week
 
 const TILAPIA_STAGES: GrowthStage[] = [
-  { from: 1,   to: 20,   rate: 4.5 },
-  { from: 20,  to: 100,  rate: 14 },
-  { from: 100, to: 300,  rate: 25 },
-  { from: 300, to: 600,  rate: 37.5 },
-  { from: 600, to: null, rate: 37.5 },
+  { from: 1,   to: 15,   rate: 4.0 },   // big jump early to remove delay
+  { from: 16,  to: 30,   rate: 13.0 },
+  { from: 31,  to: 45,   rate: 16.5 },
+  { from: 46,  to: 60,   rate: 20.5 },
+  { from: 61,  to: 75,   rate: 21.5 },
+  { from: 76,  to: 90,   rate: 22.0 },  // peak mid-phase
+  { from: 91,  to: 105,  rate: 18.0 },
+  { from: 106, to: null, rate: 12.0 },
 ]
 
 const CADENCE_DAYS = 15
@@ -123,6 +131,18 @@ export function HarvestPredictionDashboard({
   const [survival, setSurvival] = useState<number | null>(null)
 
   const sharedPondId = (pond as any).adminPondId || pond.id
+
+  /* >>> NEW: stream live sensor readings into dashboard insights (no UI impact) */
+  const { setOnReading } = useAquaSensors()
+  useEffect(() => {
+    if (!sharedPondId) return
+    setOnReading((r) => {
+      const reading: LiveReading = { ts: r.ts, temp: r.temp, ph: r.ph, tds: r.tds, do: r.do }
+      void detectRealtimeFindingsDash({ id: sharedPondId, name: pond.name }, reading)
+    })
+    return () => setOnReading(undefined)
+  }, [setOnReading, sharedPondId, pond.name])
+  /* <<< NEW end */
 
   useEffect(() => {
     if (!user || !sharedPondId) return
@@ -342,38 +362,14 @@ export function HarvestPredictionDashboard({
                 <p className="text-gray-600">Survival Rate</p>
                 <p className="font-semibold">{computedSurvivalRate.toFixed(1)}%</p>
               </div>
-              <div>
-                <p className="text-gray-600">FCR</p>
-                <p className="font-semibold">1.4</p>
-              </div>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* AI Insights (placeholder) */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center">
-            <Lightbulb className="h-5 w-5 mr-2 text-yellow-600" />
-            AI Insights & Recommendations
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div className="flex items-start space-x-3">
-              <AlertCircle className="h-5 w-5 text-blue-600 mt-0.5" />
-              <div>
-                <p className="font-medium text-gray-900">Growth Model</p>
-                <p className="text-sm text-gray-600">
-                  Predicted harvest uses the same 15-day step model as the growth chart. The date adjusts from your last
-                  ABW log and subtracts days already elapsed.
-                </p>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      {/* >>> NEW: live AI insights card (replaces the old placeholder block) */}
+      <AIInsightsCard pondId={sharedPondId} />
+      {/* <<< NEW end */}
     </div>
     </div>
   )

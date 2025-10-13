@@ -9,20 +9,16 @@ export interface GrowthStage {
   rate: number;
 }
 
-/**
- * Tilapia (Nile) stage table — midpoints of the ranges you provided.
- * - 1→20g:      ~4–5 g/w  => 4.5
- * - 20→100g:    ~13–15 g/w => 14
- * - 100→300g:   ~25 g/w
- * - 300→600g:   ~35–40 g/w => 37.5
- * - >600g:      keep last stage rate unless you’d like a different tail rule
- */
+
 export const TILAPIA_STAGES: GrowthStage[] = [
-  { from: 1,   to: 20,   rate: 4.5 },
-  { from: 20,  to: 100,  rate: 14 },
-  { from: 100, to: 300,  rate: 25 },
-  { from: 300, to: 600,  rate: 37.5 },
-  { from: 600, to: null, rate: 37.5 }, // extend beyond 600g at same pace
+  { from: 1,   to: 15,   rate: 5.0 },   
+  { from: 16,  to: 30,   rate: 13.0 },
+  { from: 31,  to: 45,   rate: 16.5 },
+  { from: 46,  to: 60,   rate: 20.5 },
+  { from: 61,  to: 75,   rate: 21.5 },
+  { from: 76,  to: 90,   rate: 22.0 },  
+  { from: 91,  to: 105,  rate: 18.0 },
+  { from: 106, to: null, rate: 12.0 },
 ];
 
 /**
