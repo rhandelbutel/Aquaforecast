@@ -51,15 +51,21 @@ const getNotificationColor = (type: AlertType) => {
     default: return "text-gray-600"
   }
 }
-const getBadgeColor = (type: AlertType) => {
-  switch (type) {
-    case "error": return "bg-red-100 text-red-800"
-    case "warning": return "bg-yellow-100 text-yellow-800"
-    case "info": return "bg-blue-100 text-blue-800"
-    case "success": return "bg-green-100 text-green-800"
-    default: return "bg-gray-100 text-gray-800"
-  }
+
+// --- NEW: badge mapping to match AlertsPanel (danger vs error) ---
+const isOfflineAlert = (a: StoredAlert) =>
+  a.id?.endsWith(":sensor-offline") ||
+  a.title?.toLowerCase?.().includes("sensor offline")
+
+const badgeTextFor = (a: StoredAlert) =>
+  isOfflineAlert(a) ? "error" : ((a as any).type === "warning" ? "warning" : "danger")
+
+const badgeClassFor = (a: StoredAlert) => {
+  if (isOfflineAlert(a)) return "bg-red-100 text-red-800"       // error
+  if ((a as any).type === "warning") return "bg-yellow-100 text-yellow-800"
+  return "bg-red-100 text-red-800"                               // danger
 }
+// ----------------------------------------------------------------
 
 function formatWhen(d: Date) {
   const diff = Math.floor((Date.now() - d.getTime()) / 60000)
@@ -206,7 +212,10 @@ export function NotificationPanel({ onClose, limit = 6 }: NotificationPanelProps
                             <h4 className="font-medium text-sm">
                               {n.pondName ? `${n.title} — ${n.pondName}` : n.title}
                             </h4>
-                            <Badge className={`${getBadgeColor(n.type as AlertType)} capitalize`}>{n.type}</Badge>
+                            {/* Use our new mapping so sensor breaches show 'danger' */}
+                            <Badge className={`${badgeClassFor(n)} capitalize`}>
+                              {badgeTextFor(n)}
+                            </Badge>
                           </div>
                           <p className="text-sm text-gray-600 mb-1">{n.message}</p>
                           <p className="text-xs text-gray-500">{formatWhen(when)}</p>
