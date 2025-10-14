@@ -191,6 +191,32 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
     })
   }, [remoteAlerts, dismissedUntil])
 
+  // Helper: is this the OFFLINE alert?
+  const isOfflineAlert = (a: StoredAlert) => a.id === `${pondId}:sensor-offline`
+
+  // Icons
+  const getAlertIcon = (type: AlertType, id?: string) => {
+    if (id === `${pondId}:sensor-offline`) return <WifiOff className="h-4 w-4 text-red-600" />
+    switch (type) {
+      case "warning": return <AlertTriangle className="h-4 w-4 text-yellow-600" />
+      case "error":
+      default:        return <XCircle className="h-4 w-4 text-red-600" />
+    }
+  }
+
+  // Badge color now considers OFFLINE vs sensor threshold
+  const getAlertBadgeColor = (a: StoredAlert) => {
+    if (isOfflineAlert(a)) return "bg-red-100 text-red-800"     // error
+    if ((a as any).type === "warning") return "bg-yellow-100 text-yellow-800" // warning
+    return "bg-red-100 text-red-800"                             // danger (sensor error)
+  }
+
+  // Badge text: error ONLY for offline; otherwise danger/warning
+  const badgeLabel = (a: StoredAlert) => {
+    if (isOfflineAlert(a)) return "error"
+    return (a as any).type === "warning" ? "warning" : "danger"
+  }
+
   // Snooze handlers
   const dismissForAnHour = async (alertId: string) => {
     const until = Date.now() + SNOOZE_MS
@@ -209,81 +235,67 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
     try { await setSnoozes(uid, remoteAlerts.map(a => a.id), until) } catch (e) { console.error("setSnoozes failed:", e) }
   }
 
-  const getAlertIcon = (type: AlertType, id?: string) => {
-    if (id === `${pondId}:sensor-offline`) return <WifiOff className="h-4 w-4 text-red-600" />
-    switch (type) {
-      case "warning": return <AlertTriangle className="h-4 w-4 text-yellow-600" />
-      case "error":
-      default:        return <XCircle className="h-4 w-4 text-red-600" />
-    }
-  }
-
-  const getAlertBadgeColor = (type: AlertType) => {
-    switch (type) {
-      case "warning": return "bg-yellow-100 text-yellow-800"
-      case "error":
-      default:        return "bg-red-100 text-red-800"
-    }
-  }
-
-  // Map stored type → badge label text.
-  // ✅ Show "error" (not "danger") for offline and other errors.
-  const badgeLabel = (type: AlertType) => (type === "error" ? "error" : "warning")
-
   return (
     <div id="export-alerts" className="w-full">
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="text-lg font-semibold">System Alerts</CardTitle>
-            <p className="text-sm text-gray-600">
-              Live notifications from sensors (pH, Temperature, DO, TDS) and device status
-            </p>
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-lg font-semibold">System Alerts</CardTitle>
+              <p className="text-sm text-gray-600">
+                Live notifications from sensors (pH, Temperature, DO, TDS) and device status
+              </p>
+            </div>
+            {visibleAlerts.length > 0 && (
+              <Button variant="outline" size="sm" onClick={clearAllForAnHour}>
+                Clear all
+              </Button>
+            )}
           </div>
-          {visibleAlerts.length > 0 && (
-            <Button variant="outline" size="sm" onClick={clearAllForAnHour}>
-              Clear all
-            </Button>
-          )}
-        </div>
-      </CardHeader>
-      <CardContent>
-        {visibleAlerts.length > 0 ? (
-          <div className="space-y-4">
-            {visibleAlerts.map((alert) => {
-              const t = (alert as any).type as AlertType
-              return (
-                <div key={alert.id} className="flex items-start space-x-3 p-4 bg-gray-50 rounded-lg">
-                  <div className="flex-shrink-0 mt-0.5">{getAlertIcon(t, alert.id)}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium text-gray-900">{alert.title}</p>
-                      <Badge className={`${getAlertBadgeColor(t)} text-xs`}>
-                        {badgeLabel(t)}
-                      </Badge>
+        </CardHeader>
+        <CardContent>
+          {visibleAlerts.length > 0 ? (
+            <div className="space-y-4">
+              {visibleAlerts.map((alert) => {
+                const t = (alert as any).type as AlertType
+                return (
+                  <div key={alert.id} className="flex items-start space-x-3 p-4 bg-gray-50 rounded-lg">
+                    <div className="flex-shrink-0 mt-0.5">
+                      {getAlertIcon(t, alert.id)}
                     </div>
-                    <p className="text-sm text-gray-600 mt-1">{alert.message}</p>
-                    <p className="text-xs text-gray-500 mt-2">
-                      {alert.updatedAt?.toDate ? alert.updatedAt.toDate().toLocaleTimeString() : ""}
-                    </p>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-medium text-gray-900">{alert.title}</p>
+                        <Badge className={`${getAlertBadgeColor(alert)} text-xs`}>
+                          {badgeLabel(alert)}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-gray-600 mt-1">{alert.message}</p>
+                      <p className="text-xs text-gray-500 mt-2">
+                        {alert.updatedAt?.toDate ? alert.updatedAt.toDate().toLocaleTimeString() : ""}
+                      </p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-gray-500"
+                      onClick={() => dismissForAnHour(alert.id)}
+                    >
+                      Dismiss
+                    </Button>
                   </div>
-                  <Button variant="ghost" size="sm" className="text-gray-500" onClick={() => dismissForAnHour(alert.id)}>
-                    Dismiss
-                  </Button>
-                </div>
-              )
-            })}
-          </div>
-        ) : (
-          <div className="text-center py-8">
-            <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
-            <p className="text-gray-600">No alerts at this time</p>
-            <p className="text-sm text-gray-500">All parameters are currently optimal</p>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
+              <p className="text-gray-600">No alerts at this time</p>
+              <p className="text-sm text-gray-500">All parameters are currently optimal</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

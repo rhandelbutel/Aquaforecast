@@ -371,6 +371,6 @@ export function HarvestPredictionDashboard({
       <AIInsightsCard pondId={sharedPondId} />
       {/* <<< NEW end */}
     </div>
-    </div>
+</div>
   )
 }

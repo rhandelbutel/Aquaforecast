@@ -50,8 +50,7 @@ const itemsCol = (pondId: string) =>
 const itemRef = (pondId: string, id: string) =>
   doc(db, "dash_insights", pondId, "items", id);
 
-/** One-per-day cooldown by key is not needed on dashboard (ephemeral),
- * so we just upsert by a stable key per “state”. */
+/** Upsert by stable key so each “state” is one document */
 async function upsertDash(
   pondId: string,
   id: string,
@@ -60,9 +59,8 @@ async function upsertDash(
   const ref = itemRef(pondId, id);
   const snap = await getDoc(ref);
   if (snap.exists()) {
-    // already active? don’t spam writes
     const cur = snap.data() as DashInsight;
-    if (cur.status === "active") return;
+    if (cur.status === "active") return; // already active → no spam writes
   }
   await setDoc(
     ref,
@@ -88,18 +86,16 @@ export function subscribeDashInsights(
   });
 }
 
-/** Lightweight React hook wrapper so components can just call useDashboardInsights(pondId). */
+/** Lightweight React hook wrapper */
 export function useDashboardInsights(pondId?: string | null) {
   const [list, setList] = useState<DashInsight[]>([]);
   useEffect(() => {
     if (!pondId) { setList([]); return; }
     const unsub = subscribeDashInsights(pondId, (items) => {
-      // auto-expire in UI: if an item has autoResolveAt passed, mark resolved & drop it from view
       const now = Date.now();
       const active = items.filter((i) => (i.autoResolveAt ?? Infinity) > now && i.status === "active");
       const expired = items.filter((i) => (i.autoResolveAt ?? Infinity) <= now && i.status === "active");
       setList(active);
-      // best-effort resolve of expired ones so they don’t come back
       expired.forEach((i) => i.id && resolveDashInsight(pondId, i.id).catch(() => {}));
     });
     return () => unsub();
@@ -111,7 +107,7 @@ export async function resolveDashInsight(pondId: string, id: string) {
   await updateDoc(itemRef(pondId, id), { status: "resolved" });
 }
 
-/** Auto-expire helper for things like feeding deviation / ABW tip (kept for API parity) */
+/** Auto-expire helper (kept for API parity) */
 export async function resolveExpiredEphemerals(_pondId: string) {
   return Date.now();
 }
@@ -171,22 +167,43 @@ function eff_tds_high() {
   return "High TDS often tracks waste buildup; can stress fish and depress DO during decomposition.";
 }
 
-/** Resolve all water alerts for a metric */
+/** Resolve an array of insight IDs (ignore errors) */
+async function resolveIds(pondId: string, ids: string[]) {
+  await Promise.all(
+    ids.map((id) => updateDoc(itemRef(pondId, id), { status: "resolved" }).catch(() => {}))
+  );
+}
+
+/** Resolve both low & high for a metric */
 async function resolveMetric(pondId: string, metric: "temp" | "ph" | "do" | "tds") {
   const ids = {
     temp: ["dash_temp_low", "dash_temp_high"],
-    ph: ["dash_ph_low", "dash_ph_high"],
-    do: ["dash_do_low", "dash_do_high"],
-    tds: ["dash_tds_low", "dash_tds_high"],
+    ph:   ["dash_ph_low",   "dash_ph_high"],
+    do:   ["dash_do_low",   "dash_do_high"],
+    tds:  ["dash_tds_low",  "dash_tds_high"],
   }[metric];
+  await resolveIds(pondId, ids);
+}
 
-  await Promise.all(ids.map((id) => updateDoc(itemRef(pondId, id), { status: "resolved" }).catch(() => {})));
+/** Resolve ALL water insights (used when device/sensor goes OFFLINE) */
+export async function resolveAllWaterInsightsForOffline(pondId: string) {
+  const ids = [
+    // Temperature
+    "dash_temp_low", "dash_temp_high", "dash_temp_ok",
+    // pH
+    "dash_ph_low", "dash_ph_high", "dash_ph_ok",
+    // DO
+    "dash_do_low", "dash_do_high", "dash_do_ok",
+    // TDS
+    "dash_tds_low", "dash_tds_high", "dash_tds_ok",
+  ];
+  await resolveIds(pondId, ids);
 }
 
 export async function detectRealtimeFindingsDash(pond: PondLite, r: LiveReading) {
   const pid = pond.id;
 
-  // TEMP
+  // === TEMP ===
   const tempState = within(r.temp, OPT.TEMP_MIN, OPT.TEMP_MAX) ? "ok" : r.temp < OPT.TEMP_MIN ? "low" : "high";
   if (tempState === "low") {
     await upsertDash(pid, "dash_temp_low", {
@@ -198,6 +215,7 @@ export async function detectRealtimeFindingsDash(pond: PondLite, r: LiveReading)
       suggestedAction: "Feed during warmest hours; consider partial water exchange or shading to stabilize.",
       evidence: { temp: r.temp },
     });
+    await resolveIds(pid, ["dash_temp_high"]); // clear opposite
   } else if (tempState === "high") {
     await upsertDash(pid, "dash_temp_high", {
       key: "dash_temp_high",
@@ -208,8 +226,8 @@ export async function detectRealtimeFindingsDash(pond: PondLite, r: LiveReading)
       suggestedAction: "Shift feed to cooler hours; add shade/aeration; small cool water top-ups if available.",
       evidence: { temp: r.temp },
     });
+    await resolveIds(pid, ["dash_temp_low"]); // clear opposite
   } else {
-    // recovered to optimal
     if (lastState[K(pid, "temp")] && lastState[K(pid, "temp")] !== "ok") {
       await upsertDash(pid, "dash_temp_ok", {
         key: "dash_temp_ok",
@@ -221,11 +239,11 @@ export async function detectRealtimeFindingsDash(pond: PondLite, r: LiveReading)
         autoResolveAt: Date.now() + 5 * 60_000,
       });
     }
-    await resolveMetric(pid, "temp");
+    await resolveMetric(pid, "temp"); // clears low & high
   }
   lastState[K(pid, "temp")] = tempState;
 
-  // DO
+  // === DO ===
   const doState = within(r.do, OPT.DO_MIN, OPT.DO_MAX) ? "ok" : r.do < OPT.DO_MIN ? "low" : "high";
   if (doState === "low") {
     await upsertDash(pid, "dash_do_low", {
@@ -237,6 +255,7 @@ export async function detectRealtimeFindingsDash(pond: PondLite, r: LiveReading)
       suggestedAction: "Run aeration; avoid heavy feeding; recheck near dawn.",
       evidence: { do: r.do },
     });
+    await resolveIds(pid, ["dash_do_high"]);
   } else if (doState === "high") {
     await upsertDash(pid, "dash_do_high", {
       key: "dash_do_high",
@@ -247,6 +266,7 @@ export async function detectRealtimeFindingsDash(pond: PondLite, r: LiveReading)
       suggestedAction: "No action needed; monitor for nighttime DO drops.",
       evidence: { do: r.do },
     });
+    await resolveIds(pid, ["dash_do_low"]);
   } else {
     if (lastState[K(pid, "do")] && lastState[K(pid, "do")] !== "ok") {
       await upsertDash(pid, "dash_do_ok", {
@@ -262,7 +282,7 @@ export async function detectRealtimeFindingsDash(pond: PondLite, r: LiveReading)
   }
   lastState[K(pid, "do")] = doState;
 
-  // pH
+  // === pH ===
   const phState = within(r.ph, OPT.PH_MIN, OPT.PH_MAX) ? "ok" : r.ph < OPT.PH_MIN ? "low" : "high";
   if (phState === "low") {
     await upsertDash(pid, "dash_ph_low", {
@@ -274,6 +294,7 @@ export async function detectRealtimeFindingsDash(pond: PondLite, r: LiveReading)
       suggestedAction: "Small water exchange; avoid harsh chemicals; verify meter calibration.",
       evidence: { ph: r.ph },
     });
+    await resolveIds(pid, ["dash_ph_high"]);
   } else if (phState === "high") {
     await upsertDash(pid, "dash_ph_high", {
       key: "dash_ph_high",
@@ -284,6 +305,7 @@ export async function detectRealtimeFindingsDash(pond: PondLite, r: LiveReading)
       suggestedAction: "Partial water exchange; reduce algae drivers; recheck midday.",
       evidence: { ph: r.ph },
     });
+    await resolveIds(pid, ["dash_ph_low"]);
   } else {
     if (lastState[K(pid, "ph")] && lastState[K(pid, "ph")] !== "ok") {
       await upsertDash(pid, "dash_ph_ok", {
@@ -299,7 +321,7 @@ export async function detectRealtimeFindingsDash(pond: PondLite, r: LiveReading)
   }
   lastState[K(pid, "ph")] = phState;
 
-  // TDS
+  // === TDS ===
   const tdsState = within(r.tds, OPT.TDS_MIN, OPT.TDS_MAX) ? "ok" : r.tds < OPT.TDS_MIN ? "low" : "high";
   if (tdsState === "low") {
     await upsertDash(pid, "dash_tds_low", {
@@ -311,6 +333,7 @@ export async function detectRealtimeFindingsDash(pond: PondLite, r: LiveReading)
       suggestedAction: "Check alkalinity/mineral levels; small water exchange if unstable pH observed.",
       evidence: { tds: r.tds },
     });
+    await resolveIds(pid, ["dash_tds_high"]);
   } else if (tdsState === "high") {
     await upsertDash(pid, "dash_tds_high", {
       key: "dash_tds_high",
@@ -321,6 +344,7 @@ export async function detectRealtimeFindingsDash(pond: PondLite, r: LiveReading)
       suggestedAction: "Siphon waste, partial water exchange; avoid overfeeding.",
       evidence: { tds: r.tds },
     });
+    await resolveIds(pid, ["dash_tds_low"]);
   } else {
     if (lastState[K(pid, "tds")] && lastState[K(pid, "tds")] !== "ok") {
       await upsertDash(pid, "dash_tds_ok", {
@@ -340,7 +364,7 @@ export async function detectRealtimeFindingsDash(pond: PondLite, r: LiveReading)
 /* --------- Feeding deviation (5-minute ephemeral) ---------- */
 export async function notifyFeedingDeviationDash(
   pondId: string,
-  pondName: string,
+  _pondName: string,
   givenG: number,
   suggestedG: number | null
 ) {
@@ -430,8 +454,6 @@ export async function notifyABWLoggedDash(
   });
 }
 
-/* --------- Aliases to match previous imports in components --------- */
-/** Back-compat export used by feeding-log-modal.tsx */
+/* --------- Aliases for back-compat --------- */
 export const pushFeedingVarianceInsight = notifyFeedingDeviationDash;
-/** Back-compat export used by growth-setup-modal.tsx */
 export const pushABWLoggedInsight = notifyABWLoggedDash;
