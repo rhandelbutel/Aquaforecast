@@ -182,6 +182,7 @@ export function ParameterCards({ pondId }: ParameterCardsProps) {
   }, [current, today, yesterday, prefs, online, tick]);
 
   return (
+    <div id="wq-cards" data-online={online ? "1" : "0"}>
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
       {cards.map((param) => {
         const TrendIcon = getTrendIcon(param.trend as any);
@@ -216,6 +217,7 @@ export function ParameterCards({ pondId }: ParameterCardsProps) {
           </Card>
         );
       })}
+    </div>
     </div>
   );
 }
