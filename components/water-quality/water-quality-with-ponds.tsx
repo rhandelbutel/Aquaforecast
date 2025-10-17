@@ -35,18 +35,23 @@ export function WaterQualityWithPonds({ ponds }: WaterQualityWithPondsProps) {
       </div>
 
       {/* Per-pond sections */}
-      {ponds.map((pond) => (
-        <div key={pond.id} className="space-y-4">
-          {/* Hidden background poster that feeds Firestore */}
-          <Ingestor pondId={pond.id!} />
+      {ponds.map((pond) => {
+        // ✅ Always use the shared/admin pond id for ingestion & metrics
+        const effectivePondId = pond.adminPondId ?? pond.id!
 
-          <h2 className="text-xl font-semibold text-gray-900">
-            {pond.name} - {pond.fishSpecies}
-          </h2>
-          <ParameterCards pondId={pond.id!} />
-          <WaterQualityCharts pondId={pond.id!} />
-        </div>
-      ))}
+        return (
+          <div key={pond.id} className="space-y-4">
+            {/* Hidden background poster that feeds Firestore (every 30s) */}
+            <Ingestor pondId={effectivePondId} />
+
+            <h2 className="text-xl font-semibold text-gray-900">
+              {pond.name} - {pond.fishSpecies}
+            </h2>
+            <ParameterCards pondId={effectivePondId} />
+            <WaterQualityCharts pondId={effectivePondId} />
+          </div>
+        )
+      })}
     </div>
   )
 }
