@@ -62,9 +62,10 @@ export async function POST(req: Request) {
         subject = "Feeding Reminder – Scheduled Feeding in 1 Hour";
         html = `
           <p>Hello,</p>
-          <p>This is a friendly reminder that your next feeding time is scheduled in <b>1 hour</b>.</p>
-          <p>Please ensure your feed is prepared and ready on time.</p>
+          <p>This is a friendly reminder that your next feeding time is coming up <b>soon</b>.</p>
+          <p>Please make sure your feed is ready and check your pond status in <b>Aquaforecast</b>.</p>
           <p>Thank you,<br/>The Aquaforecast Team</p>
+
         `;
         break;
 
