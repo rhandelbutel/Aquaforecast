@@ -5,7 +5,7 @@ import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Fish, Plus, Thermometer, Droplets, Zap } from "lucide-react" 
+import { Fish, Plus, Thermometer, Droplets, Zap } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { AddPondModal } from "../ponds/add-pond-modal"
 import { usePonds } from "@/lib/pond-context"
@@ -19,12 +19,44 @@ import {
 } from "@/lib/mortality-service"
 import { useAquaSensors } from "@/hooks/useAquaSensors"
 
-// Ideal ranges to display under each sensor title (TDS removed)
-const IDEAL = {
-  temp: "29–31 °C",
-  ph: "6.5–9.5",
-  do: "3–5 mg/L",
+// ---- Ideal ranges text (TDS removed) ----
+const IDEAL = { temp: "29–31 °C", ph: "6.5–9.5", do: "3–5 mg/L" }
+
+// ---------- Status helpers ----------
+type Band = "optimal" | "warning" | "danger" | "offline"
+
+function classifyWithBuffer(
+  value: number,
+  idealMin: number,
+  idealMax: number,
+  warningBelow: number,
+  warningAbove: number
+): Band {
+  if (!Number.isFinite(value)) return "offline"
+  if (value >= idealMin && value <= idealMax) return "optimal"
+  if ((value >= warningBelow && value < idealMin) || (value > idealMax && value <= warningAbove)) {
+    return "warning"
+  }
+  return "danger"
 }
+
+function sensorBadge(band: Band) {
+  switch (band) {
+    case "optimal":
+      return { text: "Optimal", className: "bg-green-100 text-green-800 border border-green-200" }
+    case "warning":
+      return { text: "Warning", className: "bg-yellow-100 text-yellow-800 border border-yellow-200" }
+    case "danger":
+      return { text: "Danger", className: "bg-red-100 text-red-800 border border-red-200" }
+    default:
+      return { text: "Offline", className: "bg-gray-100 text-gray-800 border border-gray-200" }
+  }
+}
+
+// Per-sensor classifiers (gentle buffers)
+const tempBand = (t: number): Band => classifyWithBuffer(t, 29, 31, 28, 32)
+const phBand = (p: number): Band => classifyWithBuffer(p, 6.5, 9.5, 6.2, 9.8)
+const doBand = (d: number): Band => classifyWithBuffer(d, 3, 5, 2.5, 5.5)
 
 export function DashboardWithPonds() {
   const { ponds, refreshPonds } = usePonds()
@@ -35,32 +67,27 @@ export function DashboardWithPonds() {
   const ESP32_BASE =
     (process.env.NEXT_PUBLIC_SENSORS_BASE as string | undefined) || "http://aquamon.local"
 
-  const { data, error, isOnline } = useAquaSensors({
-    baseUrl: ESP32_BASE,
-    intervalMs: 1000,
-  })
+  const { data, error, isOnline } = useAquaSensors({ baseUrl: ESP32_BASE, intervalMs: 1000 })
 
   const tempVal = data?.temp ?? NaN
   const phVal = data?.ph ?? NaN
   const doVal = data?.do ?? NaN
-  // const tdsVal = data?.tds ?? NaN // removed
+
+  // Per-sensor status — single badge; force offline when device is offline
+  const tempStatus: Band = isOnline ? tempBand(tempVal) : "offline"
+  const phStatus: Band = isOnline ? phBand(phVal) : "offline"
+  const doStatus: Band = isOnline ? doBand(doVal) : "offline"
 
   const [showAddModal, setShowAddModal] = useState(false)
-
-  // mortality-derived state used across the page
   const [aliveFish, setAliveFish] = useState<number | null>(null)
   const [survivalRate, setSurvivalRate] = useState<number | null>(null)
-
-  // refresh growth widgets after edits
   const [growthRefresh, setGrowthRefresh] = useState(0)
 
-  // keep selected pond synced with pond list
   useEffect(() => {
     if (ponds.length > 0 && !selectedPond) setSelectedPond(ponds[0])
     if (ponds.length === 0) setSelectedPond(null)
   }, [ponds, selectedPond])
 
-  // one-time load (for immediate first paint)
   useEffect(() => {
     const run = async () => {
       if (!selectedPond) {
@@ -72,7 +99,7 @@ export function DashboardWithPonds() {
       const initial = selectedPond.fishCount || 0
       try {
         const logs = await getMortalityLogs(sharedPondId)
-        const sr = computeSurvivalRateFromLogs(logs) // 0–100
+        const sr = computeSurvivalRateFromLogs(logs)
         const estAlive = Math.max(0, Math.round((sr / 100) * initial))
         setSurvivalRate(sr)
         setAliveFish(estAlive)
@@ -84,47 +111,30 @@ export function DashboardWithPonds() {
     run()
   }, [selectedPond?.id, (selectedPond as any)?.adminPondId, selectedPond?.fishCount])
 
-  // REALTIME subscription — instant UI sync for admin AND shared users
   useEffect(() => {
     if (!selectedPond) return
     const sharedPondId = (selectedPond as any)?.adminPondId || selectedPond.id
     const initial = selectedPond.fishCount || 0
-
     const unsub = subscribeMortalityLogs(sharedPondId, (logs) => {
-      const sr = computeSurvivalRateFromLogs(logs) // 0–100
+      const sr = computeSurvivalRateFromLogs(logs)
       const estAlive = Math.max(0, Math.round((sr / 100) * initial))
       setSurvivalRate(sr)
       setAliveFish(estAlive)
     })
-
-    return () => {
-      try {
-        unsub?.()
-      } catch {}
-    }
+    return () => { try { unsub?.() } catch {} }
   }, [selectedPond?.id, (selectedPond as any)?.adminPondId, selectedPond?.fishCount])
 
   const handleAddPond = () => setShowAddModal(true)
-  const handleCloseModal = () => {
-    setShowAddModal(false)
-    refreshPonds()
-  }
+  const handleCloseModal = () => { setShowAddModal(false); refreshPonds() }
 
-  function RealtimeClock({ data, isOnline }: { data: any; isOnline: boolean }) {
+  function RealtimeClock({ isOnline }: { data: any; isOnline: boolean }) {
     const [now, setNow] = useState(new Date())
-
     useEffect(() => {
-      let timer: NodeJS.Timeout | null = null
-      if (isOnline) timer = setInterval(() => setNow(new Date()), 1000)
-      return () => { if (timer) clearInterval(timer) }
+      let t: NodeJS.Timeout | null = null
+      if (isOnline) t = setInterval(() => setNow(new Date()), 1000)
+      return () => { if (t) clearInterval(t) }
     }, [isOnline])
-
-    const timeString = now.toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    })
-
+    const timeString = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
     return (
       <p className="text-xs text-gray-500">
         As of{" "}
@@ -132,6 +142,29 @@ export function DashboardWithPonds() {
           {timeString}
         </span>
       </p>
+    )
+  }
+
+  // helper to render a sensor card with ONE badge below the reading
+  const SensorCard: React.FC<{
+    title: string
+    icon: React.ReactNode
+    idealText: string
+    valueText: string
+    status: Band
+  }> = ({ title, icon, idealText, valueText, status }) => {
+    const b = sensorBadge(status)
+    return (
+      <div className="text-center p-4 bg-gray-50 rounded-lg">
+        <div className="mb-2 flex items-center justify-center">{icon}</div>
+        <p className="text-sm text-gray-600">{title}</p>
+        <p className="text-xs text-gray-500 mb-1">Ideal {idealText}</p>
+        <p className="text-xl font-bold">{valueText}</p>
+        {/* single status badge BELOW the reading */}
+        <div className="mt-2">
+          <Badge className={`text-xs ${b.className}`}>{b.text}</Badge>
+        </div>
+      </div>
     )
   }
 
@@ -234,52 +267,30 @@ export function DashboardWithPonds() {
                 </CardHeader>
 
                 <CardContent>
-                  {/* 3 cards now (Temp / pH / DO) */}
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    {/* Temperature */}
-                    <div className="text-center p-4 bg-gray-50 rounded-lg">
-                      <Thermometer className="h-6 w-6 mx-auto mb-2 text-green-600" />
-                      <p className="text-sm text-gray-600">Temperature</p>
-                      <p className="text-xs text-gray-500 mb-1">Ideal {IDEAL.temp}</p>
-                      <p className="text-xl font-bold">
-                        {Number.isFinite(tempVal) ? `${tempVal.toFixed(1)} °C` : "—"}
-                      </p>
-                      <Badge
-                        className={`text-xs ${isOnline ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
-                      >
-                        {isOnline ? "Live" : "Offline"}
-                      </Badge>
-                    </div>
+                    <SensorCard
+                      title="Temperature"
+                      icon={<Thermometer className="h-6 w-6 mx-auto text-green-600" />}
+                      idealText={IDEAL.temp}
+                      valueText={Number.isFinite(tempVal) ? `${tempVal.toFixed(1)} °C` : "—"}
+                      status={tempStatus}
+                    />
+                    
+                    <SensorCard
+                        title="pH Level"
+                        icon={<Droplets className="h-6 w-6 mx-auto text-blue-600" />}
+                        idealText={IDEAL.ph}
+                        valueText={Number.isFinite(phVal) ? `${phVal.toFixed(2)} pH` : "—"}
+                        status={phStatus}
+                    />
 
-                    {/* pH */}
-                    <div className="text-center p-4 bg-gray-50 rounded-lg">
-                      <Droplets className="h-6 w-6 mx-auto mb-2 text-blue-600" />
-                      <p className="text-sm text-gray-600">pH Level</p>
-                      <p className="text-xs text-gray-500 mb-1">Ideal {IDEAL.ph}</p>
-                      <p className="text-xl font-bold">
-                        {Number.isFinite(phVal) ? phVal.toFixed(2) : "—"}
-                      </p>
-                      <Badge
-                        className={`text-xs ${isOnline ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
-                      >
-                        {isOnline ? "Live" : "Offline"}
-                      </Badge>
-                    </div>
-
-                    {/* Dissolved Oxygen */}
-                    <div className="text-center p-4 bg-gray-50 rounded-lg">
-                      <Zap className="h-6 w-6 mx-auto mb-2 text-purple-600" />
-                      <p className="text-sm text-gray-600">Dissolved Oxygen</p>
-                      <p className="text-xs text-gray-500 mb-1">Ideal {IDEAL.do}</p>
-                      <p className="text-xl font-bold">
-                        {Number.isFinite(doVal) ? `${doVal.toFixed(2)} mg/L` : "—"}
-                      </p>
-                      <Badge
-                        className={`text-xs ${isOnline ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
-                      >
-                        {isOnline ? "Live" : "Offline"}
-                      </Badge>
-                    </div>
+                    <SensorCard
+                      title="Dissolved Oxygen"
+                      icon={<Zap className="h-6 w-6 mx-auto text-purple-600" />}
+                      idealText={IDEAL.do}
+                      valueText={Number.isFinite(doVal) ? `${doVal.toFixed(2)} mg/L` : "—"}
+                      status={doStatus}
+                    />
                   </div>
 
                   <div className="mt-4 pt-4 border-t text-center">
