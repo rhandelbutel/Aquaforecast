@@ -1,9 +1,10 @@
-// lib/firebase-admin.ts
+// app/lib/firebase-admin.ts
 import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
+
 /**
  * Server-only Firebase initialization using a service account.
- * Safe to import in Next.js API routes.
+ * Safe to import in Next.js API routes or server components.
  */
 const apps = getApps();
 
@@ -11,11 +12,14 @@ const app = apps.length
   ? apps[0]
   : initializeApp({
       credential: cert({
-        projectId: "aquaforecast-6b568",
+        projectId: process.env.FIREBASE_PROJECT_ID,
         clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        // convert escaped newlines to real ones
-        privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+        // ✅ Fix 1: Ensure the key exists and convert escaped \n back to real newlines
+        privateKey: (process.env.FIREBASE_PRIVATE_KEY || "")
+          .replace(/\\n/g, "\n")
+          .replace(/"/g, ""), // removes any stray quotes if Vercel added them
       }),
     });
 
+// ✅ Fix 2: Explicitly export Firestore for admin use
 export const adminDb = getFirestore(app);
