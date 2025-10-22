@@ -1,3 +1,4 @@
+// components/water-quality/export-data.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -20,7 +21,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 /**
  * Export picker + offline guard
  * - Blocks export if #wq-cards or #wq-charts has data-online="0"
- * - Lets user choose what to include: Cards, Temp, pH, DO, TDS (or All)
+ * - Lets user choose what to include: Cards, Temp, pH, DO (or All)
  * - One-page A4 (portrait), vertical stack aligned to TOP-LEFT
  */
 export function ExportData() {
@@ -35,17 +36,16 @@ export function ExportData() {
   const [pickTemp, setPickTemp] = useState(true);
   const [pickPH, setPickPH] = useState(true);
   const [pickDO, setPickDO] = useState(true);
-  const [pickTDS, setPickTDS] = useState(true);
 
   const anyPicked = useMemo(
-    () => pickCards || pickTemp || pickPH || pickDO || pickTDS,
-    [pickCards, pickTemp, pickPH, pickDO, pickTDS]
+    () => pickCards || pickTemp || pickPH || pickDO,
+    [pickCards, pickTemp, pickPH, pickDO]
   );
 
   // keep "All" in sync with individual picks
   useEffect(() => {
-    setPickAll(pickCards && pickTemp && pickPH && pickDO && pickTDS);
-  }, [pickCards, pickTemp, pickPH, pickDO, pickTDS]);
+    setPickAll(pickCards && pickTemp && pickPH && pickDO);
+  }, [pickCards, pickTemp, pickPH, pickDO]);
 
   const resetPicks = () => {
     // restore default = all selected
@@ -58,7 +58,6 @@ export function ExportData() {
     setPickTemp(checked);
     setPickPH(checked);
     setPickDO(checked);
-    setPickTDS(checked);
   };
 
   const checkOffline = () => {
@@ -105,19 +104,14 @@ export function ExportData() {
         const el = document.getElementById("chart-do");
         if (el) targets.push(el);
       }
-      if (pickTDS) {
-        const el = document.getElementById("chart-tds");
-        if (el) targets.push(el);
-      }
 
-      // if nothing selected (edge), fall back to all 5 if present
+      // if nothing selected (edge), fall back to all 4 if present
       if (!targets.length) {
         const all: (HTMLElement | null)[] = [
           document.getElementById("wq-cards"),
           document.getElementById("chart-temp"),
           document.getElementById("chart-ph"),
           document.getElementById("chart-do"),
-          document.getElementById("chart-tds"),
         ];
         all.forEach((el) => el && targets.push(el));
       }
@@ -166,7 +160,7 @@ export function ExportData() {
 
       // We cap each block to a reasonable maximum (for 1–3 items),
       // and auto-scale down if total would overflow.
-      const n = imgs.length;              // 1..5
+      const n = imgs.length;              // 1..4
       const MAX_BLOCK_H = 260;            // pleasant size for 1–3 items
       const needed = n * MAX_BLOCK_H + (n - 1) * gap;
       const scaleDown = needed > availH ? availH / needed : 1;
@@ -300,15 +294,6 @@ export function ExportData() {
                   onCheckedChange={(v) => setPickDO(Boolean(v))}
                 />
                 <Label htmlFor="opt-do">DO graph</Label>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <Checkbox
-                  id="opt-tds"
-                  checked={pickTDS}
-                  onCheckedChange={(v) => setPickTDS(Boolean(v))}
-                />
-                <Label htmlFor="opt-tds">TDS graph</Label>
               </div>
             </div>
 

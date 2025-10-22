@@ -9,14 +9,13 @@ import {
   subscribeDashInsights,
   resolveDashInsight,
   type DashInsight,
-  type LiveReading,
+  // NOTE: don't import LiveReading to avoid forcing a 'tds' field
   type PondLite,
   detectRealtimeFindingsDash,
-  resolveAllWaterInsightsForOffline, // used when going offline (with delay)
+  resolveAllWaterInsightsForOffline,
 } from "@/lib/dash-insights-service";
 import { useAquaSensors } from "@/hooks/useAquaSensors";
 
-// Icons / badges
 const iconFor = (sev: DashInsight["severity"]) =>
   sev === "error" ? XCircle : sev === "warning" ? AlertTriangle : Info;
 
@@ -27,26 +26,23 @@ const badgeFor = (sev: DashInsight["severity"]) =>
     ? "bg-amber-100 text-amber-800"
     : "bg-blue-100 text-blue-800";
 
-// Base URL (overridable by env)
 const ESP32_BASE =
   (process.env.NEXT_PUBLIC_SENSORS_BASE as string | undefined) || "http://aquamon.local";
 
-// Throttle thresholds to avoid hammering Firestore
-const DIFF = { temp: 0.5, ph: 0.2, do: 0.2, tds: 10 };
+// TDS removed
+const DIFF = { temp: 0.5, ph: 0.2, do: 0.2 };
 
-// Delay before clearing insights after going offline
-const OFFLINE_CLEAR_DELAY_MS = 1_000; // 5 seconds
+// Change this to 10000 if you want 10s
+const OFFLINE_CLEAR_DELAY_MS = 5_000;
 
 export function AIInsightsCard({ pondId, pondName }: { pondId: string; pondName?: string }) {
   const [items, setItems] = useState<DashInsight[]>([]);
 
-  // 1) Subscribe to current insights (UI reacts in realtime)
   useEffect(() => {
     if (!pondId) return;
     return subscribeDashInsights(pondId, setItems);
   }, [pondId]);
 
-  // 2) Periodically resolve ephemerals that have autoResolveAt
   useEffect(() => {
     const t = setInterval(() => {
       const now = Date.now();
@@ -59,10 +55,10 @@ export function AIInsightsCard({ pondId, pondName }: { pondId: string; pondName?
     return () => clearInterval(t);
   }, [items, pondId]);
 
-  // 3) Realtime driver: feed live sensor data into detectRealtimeFindingsDash
   const { data, isOnline } = useAquaSensors({ baseUrl: ESP32_BASE, intervalMs: 1000 });
 
-  const lastSentRef = useRef<{ ts: number; temp: number; ph: number; do: number; tds: number } | null>(null);
+  
+  const lastSentRef = useRef<{ ts: number; temp: number; ph: number; do: number } | null>(null);
 
   useEffect(() => {
     if (!pondId || !isOnline || !data) return;
@@ -75,40 +71,32 @@ export function AIInsightsCard({ pondId, pondName }: { pondId: string; pondName?
       Math.abs((data.temp ?? NaN) - (last.temp ?? NaN)) >= DIFF.temp ||
       Math.abs((data.ph ?? NaN) - (last.ph ?? NaN)) >= DIFF.ph ||
       Math.abs((data.do ?? NaN) - (last.do ?? NaN)) >= DIFF.do ||
-      Math.abs((data.tds ?? NaN) - (last.tds ?? NaN)) >= DIFF.tds ||
-      now - (last.ts || 0) >= 3000; // hard throttle: 3s
+      now - (last.ts || 0) >= 3000;
 
     if (!changedEnough) return;
 
-    const reading: LiveReading = {
+    // Build reading without TDS
+    const reading = {
       ts: now,
       temp: Number(data.temp ?? NaN),
       ph: Number(data.ph ?? NaN),
       do: Number(data.do ?? NaN),
-      tds: Number(data.tds ?? NaN),
     };
 
     const pondLite: PondLite = { id: pondId, name: pondName };
-    void detectRealtimeFindingsDash(pondLite, reading).catch(() => {});
+    
+    void detectRealtimeFindingsDash(pondLite, reading as any).catch(() => {});
 
-    lastSentRef.current = { ts: now, temp: reading.temp, ph: reading.ph, do: reading.do, tds: reading.tds };
+    lastSentRef.current = { ts: now, temp: reading.temp, ph: reading.ph, do: reading.do };
   }, [pondId, pondName, data, isOnline]);
 
-  // 4) Delay-clear when device goes OFFLINE; cancel if it comes back ONLINE
-  const prevOnline = useRef<boolean | null>(null);
+  // --- OFFLINE CLEAR WITH INITIAL-STATE COVERAGE ---
   const offlineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   useEffect(() => {
     if (!pondId) return;
 
-    // initialize previous state
-    if (prevOnline.current === null) {
-      prevOnline.current = isOnline;
-      return;
-    }
-
-    // online → offline: start a 10s timer; if it stays offline for 10s, clear insights
-    if (prevOnline.current === true && isOnline === false && !offlineTimerRef.current) {
+    // If currently offline and no timer yet, schedule a clear.
+    if (isOnline === false && !offlineTimerRef.current) {
       offlineTimerRef.current = setTimeout(() => {
         void resolveAllWaterInsightsForOffline(pondId).finally(() => {
           offlineTimerRef.current = null;
@@ -116,16 +104,22 @@ export function AIInsightsCard({ pondId, pondName }: { pondId: string; pondName?
       }, OFFLINE_CLEAR_DELAY_MS);
     }
 
-    // offline → online: cancel any pending clear
-    if (prevOnline.current === false && isOnline === true && offlineTimerRef.current) {
+    // If we come back online, cancel any pending clear.
+    if (isOnline === true && offlineTimerRef.current) {
       clearTimeout(offlineTimerRef.current);
       offlineTimerRef.current = null;
     }
 
-    prevOnline.current = isOnline;
+    // Cleanup when pond switches
+    return () => {
+      if (offlineTimerRef.current) {
+        clearTimeout(offlineTimerRef.current);
+        offlineTimerRef.current = null;
+      }
+    };
   }, [isOnline, pondId]);
+  // -----------------------------------------------
 
-  // 5) Sort + show active insights only
   const display = useMemo(() => {
     const rank = (s: DashInsight["severity"]) =>
       s === "error" ? 3 : s === "danger" ? 2 : s === "warning" ? 1 : 0;

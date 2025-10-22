@@ -255,7 +255,7 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
       {/* Export Modal 👇 NEW */}
       <ExportModal
         open={showExportModal}
-        onClose={() => setShowExportModal(false)}
+        onCloseAction={() => setShowExportModal(false)}
         pond={pond}
       />
     </>

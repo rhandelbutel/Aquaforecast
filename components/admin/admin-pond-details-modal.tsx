@@ -38,7 +38,6 @@ const generateDetailedReadings = () => ({
   temperature: (24 + Math.random() * 2).toFixed(1),
   ph: (7.0 + Math.random() * 0.5).toFixed(1),
   oxygen: (8.0 + Math.random() * 0.5).toFixed(1),
-  tds: (440 + Math.random() * 20).toFixed(0),
   status: Math.random() > 0.8 ? "warning" : "optimal",
 })
 
@@ -104,7 +103,6 @@ export function AdminPondDetailsModal({ pond, isOpen, onClose }: AdminPondDetail
             </div>
             <div className="text-center p-3 bg-gray-50 rounded-lg">
               <Zap className="h-6 w-6 text-yellow-500 mx-auto mb-1" />
-              <p className="text-lg font-bold">{readings.tds} ppm</p>
               <p className="text-xs text-gray-600">TDS</p>
             </div>
           </div>

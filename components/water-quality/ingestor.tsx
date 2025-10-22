@@ -9,29 +9,35 @@ export function Ingestor({ pondId }: { pondId: string }) {
     async function pushOnce() {
       try {
         const res = await fetch("http://aquamon.local/sensors", { cache: "no-store" });
+        if (!res.ok) return; // treat as offline if bad status
         const j = await res.json();
         if (stopped) return;
 
-        // Post to your API route that updates Firestore buckets + daily sums
+        const payload = {
+          pondId,
+          temp: Number(j.tempC),
+          ph: Number(j.pH),
+          do: Number(j.DOmgL),
+        };
+
+        // basic sanity: skip if any value isn't finite
+        if ([payload.temp, payload.ph, payload.do].some((v) => !Number.isFinite(v))) return;
+
+        // ✅ correct endpoint: /api/ingest  (not /api/ingest/route)
         await fetch("/api/ingest", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            pondId,
-            temp: Number(j.temp),
-            ph: Number(j.ph),
-            tds: Number(j.tds),
-            do: Number(j.do),
-          }),
+          body: JSON.stringify(payload),
         });
-      } catch (e) {
-        // ignore network errors silently
+      } catch {
+        // network errors -> treat as offline; do nothing
       }
     }
 
-    // send once now, then every 3 minutes
+    // send immediately, then every 30s
     pushOnce();
-    const id = setInterval(pushOnce, 3 * 60 * 1000);
+    const id = setInterval(pushOnce, 30 * 1000);
+
     return () => {
       stopped = true;
       clearInterval(id);

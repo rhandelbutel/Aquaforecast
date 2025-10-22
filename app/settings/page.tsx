@@ -17,7 +17,7 @@ export default function SettingsPage() {
           Manage your account and system preferences{" "}
           {pondId && (
             <>
-              — <span className="font-medium">context:</span> pond <code className="text-xs">{pondId}</code>
+              {/* — <span className="font-medium">context:</span> pond <code className="text-xs">{pondId}</code> */}
             </>
           )}
         </p>

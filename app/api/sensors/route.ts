@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 
-const DEFAULT_BASE = process.env.SENSORS_BASE || process.env.NEXT_PUBLIC_SENSORS_BASE || "http://aquamon.local"
+const DEFAULT_BASE = process.env.SENSORS_BASE || process.env.NEXT_PUBLIC_SENSORS_BASE || "http://aquamon.local/sensors"
 
 function withCors(res: NextResponse) {
   res.headers.set("Access-Control-Allow-Origin", "*")

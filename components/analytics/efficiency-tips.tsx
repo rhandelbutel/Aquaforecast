@@ -8,9 +8,15 @@ import { AlertTriangle, Info, XCircle } from "lucide-react";
 import type { PondData } from "@/lib/pond-service";
 
 import {
-  detectRealtimeFindings, detectMortality, detectGrowthDelta, detectOffline,
-  subscribeInsights, resolveInsight, snoozeInsight, recordHeartbeat,
-  type Insight
+  detectRealtimeFindings,
+  detectMortality,
+  detectGrowthDelta,
+  detectOffline,
+  subscribeInsights,
+  resolveInsight,
+  snoozeInsight,
+  recordHeartbeat,
+  type Insight,
 } from "@/lib/insights-service";
 
 import { useAquaSensors } from "@/hooks/useAquaSensors";
@@ -18,14 +24,14 @@ import { useAquaSensors } from "@/hooks/useAquaSensors";
 type Props = { pond: PondData & { id: string } };
 
 const iconFor = (sev: Insight["severity"]) =>
-  sev === "danger" || sev === "error" ? XCircle
-  : sev === "warning" ? AlertTriangle
-  : Info;
+  sev === "danger" || sev === "error" ? XCircle : sev === "warning" ? AlertTriangle : Info;
 
 const badgeFor = (sev: Insight["severity"]) =>
-  sev === "danger" || sev === "error" ? "bg-red-100 text-red-800"
-  : sev === "warning" ? "bg-yellow-100 text-yellow-800"
-  : "bg-blue-100 text-blue-800";
+  sev === "danger" || sev === "error"
+    ? "bg-red-100 text-red-800"
+    : sev === "warning"
+    ? "bg-yellow-100 text-yellow-800"
+    : "bg-blue-100 text-blue-800";
 
 export function EfficiencyTips({ pond }: Props) {
   const [items, setItems] = useState<Insight[]>([]);
@@ -37,17 +43,21 @@ export function EfficiencyTips({ pond }: Props) {
   }, [pond?.id]);
 
   // 2) Stream sensors → detectors + heartbeat
-  //    NOTE: use returned setOnReading (no function prop in options)
   const { setOnReading } = useAquaSensors({ baseUrl: "/api", intervalMs: 1000 });
 
   useEffect(() => {
     if (!pond?.id) return;
 
     setOnReading(async (r) => {
+      // Always record a heartbeat
       await recordHeartbeat(pond.id);
+
+      // ✅ Guard: only run realtime detection when all values are numbers
+      if (r.temp == null || r.ph == null || r.do == null) return;
+
       await detectRealtimeFindings(
         { id: pond.id, name: pond.name, fishSpecies: pond.fishSpecies },
-        { ts: r.ts, temp: r.temp, ph: r.ph, tds: r.tds, do: r.do }
+        { ts: r.ts, temp: r.temp, ph: r.ph, do: r.do } // TDS removed
       );
     });
 
@@ -73,18 +83,19 @@ export function EfficiencyTips({ pond }: Props) {
     };
 
     run();
-    return () => { stop = true; };
+    return () => {
+      stop = true;
+    };
   }, [pond?.id, pond?.name]);
 
   // 4) Sort & trim (danger > error > warning > info; newest first)
   const display = useMemo(() => {
-    const rank = (s: Insight["severity"]) =>
-      s === "danger" ? 3 : s === "error" ? 2 : s === "warning" ? 1 : 0;
+    const rank = (s: Insight["severity"]) => (s === "danger" ? 3 : s === "error" ? 2 : s === "warning" ? 1 : 0);
 
-    const filtered = items.filter(i => i.status === "active");
+    const filtered = items.filter((i) => i.status === "active");
     return filtered
       .slice()
-      .sort((a, b) => (rank(b.severity) - rank(a.severity)) || (b.createdAt - a.createdAt))
+      .sort((a, b) => rank(b.severity) - rank(a.severity) || b.createdAt - a.createdAt)
       .slice(0, 6);
   }, [items]);
 
@@ -95,9 +106,7 @@ export function EfficiencyTips({ pond }: Props) {
       </CardHeader>
       <CardContent>
         {display.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No active alerts. Tips will appear as we capture more data.
-          </p>
+          <p className="text-sm text-muted-foreground">No active alerts. Tips will appear as we capture more data.</p>
         ) : (
           <div className="space-y-3">
             {display.map((it) => {

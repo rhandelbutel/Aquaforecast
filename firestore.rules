@@ -11,16 +11,19 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
-    // Use Firebase custom claims for admins:
-    // e.g. set via Admin SDK: auth.setCustomUserClaims(uid, { role: 'admin' })
+    // Use Firebase custom claims for admins OR user profile role.
     function isAdmin() {
       return isSignedIn() && (
         request.auth.token.role == 'admin' ||
-        request.auth.token.admin == true
+        request.auth.token.admin == true  ||
+        (
+          // fallback to users/{uid}.role
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin"
+        )
       );
     }
 
-    // Ensure regular users cannot change admin-only fields on /users docs
     function userDoesNotChangeAdminFields() {
       return isAdmin() ||
         (
@@ -34,27 +37,22 @@ service cloud.firestore {
         );
     }
 
-    // 🔎 Helper to check pond access using the parent doc
     function canAccessPond(pondId) {
       let pond = get(/databases/$(database)/documents/ponds/$(pondId));
       return isSignedIn() && (
         isAdmin() ||
-        // owner
         (pond.data.userId == request.auth.uid) ||
-        // OPTIONAL: if you store collaborators on the pond doc, uncomment whichever you use:
         (pond.data.members != null && request.auth.uid in pond.data.members) ||
         (pond.data.collaborators != null && request.auth.uid in pond.data.collaborators)
       );
     }
 
-    // (Optional) minimal validation for alert writes
     function isValidAlert(pondId) {
       return
         request.resource.data.pondId == pondId &&
         request.resource.data.type in ['warning','error','success','info'] &&
         request.resource.data.severity in ['low','medium','high'] &&
         request.resource.data.active is bool;
-        // Note: we intentionally don't strict-validate timestamps to allow serverTimestamp()
     }
 
     // ---------- USERS ----------
@@ -92,18 +90,23 @@ service cloud.firestore {
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
     }
 
+    // ---------- FEEDING SCHEDULES (ADMIN-ONLY WRITES) ----------
+    // Collection name matches your service: "feeding-schedules", doc id = pondId
+    match /feeding-schedules/{pondId} {
+      // Everyone signed in can read the schedule
+      allow read: if isSignedIn();
+      // Only admins can create/update/delete schedules
+      allow create, update, delete: if isAdmin();
+    }
+
     // ---------- PONDS ----------
     match /ponds/{pondId} {
-      // Your existing rule (owner-only). Keep as-is unless you want members to read/write the pond doc itself.
       allow read, write: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
 
-      // ✅ NEW: POND ALERTS SUBCOLLECTION
       match /alerts/{alertId} {
-        // Read/write alerts if caller can access the pond (owner/admin/optional members)
         allow read: if canAccessPond(pondId);
         allow create, update: if canAccessPond(pondId) && isValidAlert(pondId);
-        // Optional: allow deletes (e.g., for admin tools)
         allow delete: if canAccessPond(pondId) && isAdmin();
       }
     }

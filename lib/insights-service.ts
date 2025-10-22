@@ -39,7 +39,6 @@ export type LiveReading = {
   ts: number;
   temp: number;
   ph: number;
-  tds: number;
   do: number;
 };
 
@@ -52,7 +51,7 @@ export type PondLite = {
 };
 
 // ----------------------------- Config (Ranges) -----------------------------
-// Your requested optimal ranges + simple alert rules
+// Optimal ranges + simple alert rules (TDS removed)
 export const thresholds = {
   DO: {
     optimalMin: 3.0,
@@ -66,13 +65,9 @@ export const thresholds = {
     optimalMin: 29, // °C
     optimalMax: 31,
   },
-  tds: {
-    optimalMin: 100, // ppm
-    optimalMax: 400,
-  },
   device: { offlineMin: 20, gapMin: 90, recoverMin: 10 },
   mortality: { warnPctDay: 2, errorPctDay: 5, baselineDays: 15, streakDays: 3 },
-  growth: { dailyGainG: 1.8 }, // kept for other views if needed
+  growth: { dailyGainG: 1.8 },
 };
 
 // ----------------------------- Paths & helpers -----------------------------
@@ -142,28 +137,25 @@ async function resolveTodayByKey(pondId: string, key: string) {
   } catch {}
 }
 
-// 0ms = resolve immediately once optimal
-const NORMAL_WINDOWS = { do: 0, ph: 0, temp: 0, tds: 0 };
+// 0ms = resolve immediately once optimal (TDS removed)
+const NORMAL_WINDOWS = { do: 0, ph: 0, temp: 0 };
 
 async function maybeResolveWater(pondId: string, r: LiveReading) {
-  const doOk   = r.do  >= thresholds.DO.optimalMin   && r.do  <= thresholds.DO.optimalMax;
-  const phOk   = r.ph  >= thresholds.pH.optimalMin   && r.ph  <= thresholds.pH.optimalMax;
-  const tempOk = r.temp>= thresholds.tempC.optimalMin&& r.temp<= thresholds.tempC.optimalMax;
-  const tdsOk  = r.tds >= thresholds.tds.optimalMin  && r.tds <= thresholds.tds.optimalMax;
+  const doOk   = r.do   >= thresholds.DO.optimalMin   && r.do   <= thresholds.DO.optimalMax;
+  const phOk   = r.ph   >= thresholds.pH.optimalMin   && r.ph   <= thresholds.pH.optimalMax;
+  const tempOk = r.temp >= thresholds.tempC.optimalMin && r.temp <= thresholds.tempC.optimalMax;
 
   markNormal(pondId, "do", doOk);
   markNormal(pondId, "ph", phOk);
   markNormal(pondId, "temp", tempOk);
-  markNormal(pondId, "tds", tdsOk);
 
   const now = Date.now();
   if (doOk   && lastNormalSince[`${pondId}:do`]   !== undefined && now - lastNormalSince[`${pondId}:do`]   >= NORMAL_WINDOWS.do)   { await resolveTodayByKey(pondId, "do_low");   await resolveTodayByKey(pondId, "do_high"); await resolveTodayByKey(pondId, "do_warning"); }
   if (phOk   && lastNormalSince[`${pondId}:ph`]   !== undefined && now - lastNormalSince[`${pondId}:ph`]   >= NORMAL_WINDOWS.ph)   { await resolveTodayByKey(pondId, "ph_danger"); await resolveTodayByKey(pondId, "ph_warning"); }
   if (tempOk && lastNormalSince[`${pondId}:temp`] !== undefined && now - lastNormalSince[`${pondId}:temp`] >= NORMAL_WINDOWS.temp) { await resolveTodayByKey(pondId, "temp_warning"); await resolveTodayByKey(pondId, "temp_heat"); }
-  if (tdsOk  && lastNormalSince[`${pondId}:tds`]  !== undefined && now - lastNormalSince[`${pondId}:tds`]  >= NORMAL_WINDOWS.tds)  { await resolveTodayByKey(pondId, "tds_warning"); }
 }
 
-// ----------------------------- Detectors (4 lanes) -----------------------------
+// ----------------------------- Detectors (3 water lanes now) -----------------------------
 
 // 1) Realtime sensor findings (based on your ranges)
 export async function detectRealtimeFindings(pond: PondLite, r: LiveReading) {
@@ -219,20 +211,6 @@ export async function detectRealtimeFindings(pond: PondLite, r: LiveReading) {
       suggestedAction:
         "Feed during cooler hours (6–8 AM, 5–6 PM). Add shade/splash; consider a small cool water exchange.",
       evidence: { value: r.temp },
-    });
-  }
-
-  // ---- TDS: optimal 100–400 ppm
-  if (r.tds < thresholds.tds.optimalMin || r.tds > thresholds.tds.optimalMax) {
-    await upsertInsight(pId, {
-      key: "tds_warning",
-      title: "TDS outside optimal",
-      message: `TDS is ${r.tds.toFixed(0)} ppm (optimal 100–400 ppm).`,
-      severity: "warning",
-      category: "water",
-      suggestedAction:
-        "Do a 10–20% water exchange and check source water quality. Avoid overfeeding/overfertilizing.",
-      evidence: { value: r.tds },
     });
   }
 

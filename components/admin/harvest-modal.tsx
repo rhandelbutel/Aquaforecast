@@ -11,6 +11,9 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import type { UnifiedPond } from "@/lib/pond-context"
 import { applyPartialHarvest, totalHarvest } from "@/lib/pond-service"
 
+// ✅ import this
+import { resolveDashInsight } from "@/lib/dash-insights-service"
+
 type Mode = "partial" | "total"
 
 interface HarvestModalProps {
@@ -26,7 +29,6 @@ const fmtDate = (d = new Date()) =>
   new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" }).format(d)
 
 export default function HarvestModal({ open, onOpenChange, ponds, pond, onDone }: HarvestModalProps) {
-  // If a pond prop is provided, use it; otherwise default to first pond
   const initialPond = pond ?? (ponds.length ? ponds[0] : undefined)
   const [activePondId, setActivePondId] = useState<string>(initialPond?.id || "")
   const [mode, setMode] = useState<Mode>("partial")
@@ -54,7 +56,6 @@ export default function HarvestModal({ open, onOpenChange, ponds, pond, onDone }
       return
     }
 
-    // Always use the SHARED admin id when mutating (users use adminPondId; admin uses its id)
     const targetId = (activePond as any).adminPondId || activePond.id
 
     setErr("")
@@ -71,6 +72,10 @@ export default function HarvestModal({ open, onOpenChange, ponds, pond, onDone }
       } else {
         await totalHarvest(targetId)
       }
+
+      // ✅ Automatically resolve the “Partial Harvest Recommended” insight
+      await resolveDashInsight(targetId, "dash_partial_harvest").catch(() => {})
+
       onOpenChange(false)
       onDone?.()
     } catch (e: any) {
@@ -94,13 +99,11 @@ export default function HarvestModal({ open, onOpenChange, ponds, pond, onDone }
           </Alert>
         )}
 
-        {/* Pond name — plain text (no dropdown icon) */}
         <div className="space-y-2">
           <Label>Pond</Label>
           <Input value={activePond?.name ?? ""} disabled className="bg-gray-50" />
         </div>
 
-        {/* Harvest Type — dropdown */}
         <div className="space-y-2 mt-3">
           <Label>Harvest Type</Label>
           <Select value={mode} onValueChange={(v) => setMode(v as Mode)}>
@@ -114,7 +117,6 @@ export default function HarvestModal({ open, onOpenChange, ponds, pond, onDone }
           </Select>
         </div>
 
-        {/* Partial fields */}
         {mode === "partial" && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
             <div className="space-y-2">
@@ -136,7 +138,6 @@ export default function HarvestModal({ open, onOpenChange, ponds, pond, onDone }
           </div>
         )}
 
-        {/* Total info */}
         {mode === "total" && (
           <div className="rounded-md border bg-amber-50 text-amber-900 text-sm p-3 mt-2">
             This will reset this pond’s cycle (sets fish alive to 0 and clears related data). This cannot be undone.
@@ -144,8 +145,12 @@ export default function HarvestModal({ open, onOpenChange, ponds, pond, onDone }
         )}
 
         <DialogFooter className="mt-4">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
-          <Button onClick={doSave} disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={doSave} disabled={saving}>
+            {saving ? "Saving..." : "Save"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

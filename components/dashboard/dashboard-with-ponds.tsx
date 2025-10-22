@@ -1,14 +1,14 @@
+// components/dashboard/dashboard-with-ponds.tsx
 "use client"
 
 import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Fish, Plus, Thermometer, Droplets, Zap, Eye } from "lucide-react"
+import { Fish, Plus, Thermometer, Droplets, Zap } from "lucide-react" 
 import { Badge } from "@/components/ui/badge"
 import { AddPondModal } from "../ponds/add-pond-modal"
 import { usePonds } from "@/lib/pond-context"
-import { RealtimeData } from "./realtime-data"
 import { AlertsPanel } from "./alerts-panel"
 import { QuickActions } from "./quick-actions"
 import { HarvestPredictionDashboard } from "./harvest-prediction-dashboard"
@@ -17,25 +17,33 @@ import {
   computeSurvivalRateFromLogs,
   subscribeMortalityLogs,
 } from "@/lib/mortality-service"
-import { useAquaSensors } from "@/hooks/useAquaSensors";
+import { useAquaSensors } from "@/hooks/useAquaSensors"
+
+// Ideal ranges to display under each sensor title (TDS removed)
+const IDEAL = {
+  temp: "29–31 °C",
+  ph: "6.5–9.5",
+  do: "3–5 mg/L",
+}
 
 export function DashboardWithPonds() {
   const { ponds, refreshPonds } = usePonds()
-  const [selectedPond, setSelectedPond] = useState<ReturnType<typeof usePonds>["ponds"][number] | null>(
-    ponds[0] || null,
-  )
+  const [selectedPond, setSelectedPond] =
+    useState<ReturnType<typeof usePonds>["ponds"][number] | null>(ponds[0] || null)
+
   // Use env-configured base URL if provided; default to mDNS host
-  const ESP32_BASE = (process.env.NEXT_PUBLIC_SENSORS_BASE as string | undefined) || "http://aquamon.local";
+  const ESP32_BASE =
+    (process.env.NEXT_PUBLIC_SENSORS_BASE as string | undefined) || "http://aquamon.local"
+
   const { data, error, isOnline } = useAquaSensors({
     baseUrl: ESP32_BASE,
     intervalMs: 1000,
-  });
+  })
 
-  const tempVal = data?.temp ?? NaN;
-  const phVal   = data?.ph   ?? NaN;
-  const doVal   = data?.do   ?? NaN;
-  const tdsVal  = data?.tds  ?? NaN;
-
+  const tempVal = data?.temp ?? NaN
+  const phVal = data?.ph ?? NaN
+  const doVal = data?.do ?? NaN
+  // const tdsVal = data?.tds ?? NaN // removed
 
   const [showAddModal, setShowAddModal] = useState(false)
 
@@ -103,35 +111,29 @@ export function DashboardWithPonds() {
   }
 
   function RealtimeClock({ data, isOnline }: { data: any; isOnline: boolean }) {
-    const [now, setNow] = useState(new Date());
+    const [now, setNow] = useState(new Date())
 
     useEffect(() => {
-      let timer: NodeJS.Timeout | null = null;
+      let timer: NodeJS.Timeout | null = null
+      if (isOnline) timer = setInterval(() => setNow(new Date()), 1000)
+      return () => { if (timer) clearInterval(timer) }
+    }, [isOnline])
 
-      if (isOnline) {
-        // 🟢 Start updating time every second only when device is online
-        timer = setInterval(() => setNow(new Date()), 1000);
-      }
-
-      // 🔴 Stop timer when offline
-      return () => {
-        if (timer) clearInterval(timer);
-      };
-    }, [isOnline]);
-
-    const timeString = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    const uptime = data ? Math.round(data.ts / 1000) : 0;
+    const timeString = now.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    })
 
     return (
       <p className="text-xs text-gray-500">
         As of{" "}
         <span className={`font-medium ${isOnline ? "text-green-700" : "text-red-600"}`}>
           {timeString}
-        </span>{" "}
+        </span>
       </p>
-    );
+    )
   }
-
 
   return (
     <>
@@ -143,7 +145,7 @@ export function DashboardWithPonds() {
             <p className="text-gray-600">Monitor your aquaculture operations</p>
           </div>
 
-        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3">
             {ponds.length > 0 && (
               <Select
                 value={selectedPond?.id || ""}
@@ -179,141 +181,113 @@ export function DashboardWithPonds() {
           <>
             {/* Current Pond Info */}
             <div id="export-pond-summary" className="w-full">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Fish className="h-5 w-5 mr-2 text-cyan-600" />
-                  {selectedPond.name}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                  <div>
-                    <p className="text-gray-600">Species</p>
-                    <p className="font-semibold">{selectedPond.fishSpecies || "N/A"}</p>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <Fish className="h-5 w-5 mr-2 text-cyan-600" />
+                    {selectedPond.name}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div>
+                      <p className="text-gray-600">Species</p>
+                      <p className="font-semibold">{selectedPond.fishSpecies || "N/A"}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-600">Area</p>
+                      <p className="font-semibold">{selectedPond.area || 0} m²</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-600">Estimated Fish Count</p>
+                      <p className="font-semibold flex items-baseline gap-2">
+                        {aliveFish !== null ? aliveFish.toLocaleString() : "—"}
+                        <span className="text-xs text-gray-500">
+                          {survivalRate !== null ? `${survivalRate.toFixed(1)}% SR` : ""}
+                        </span>
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-gray-600">Feeding</p>
+                      <p className="font-semibold">{selectedPond.feedingFrequency || 0}x daily</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-gray-600">Area</p>
-                    <p className="font-semibold">{selectedPond.area || 0} m²</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-600">Estimated Fish Count</p>
-                    <p className="font-semibold flex items-baseline gap-2">
-                      {aliveFish !== null ? aliveFish.toLocaleString() : "—"}
-                      <span className="text-xs text-gray-500">
-                        {survivalRate !== null ? `${survivalRate.toFixed(1)}% SR` : ""}
-                      </span>
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-gray-600">Feeding</p>
-                    <p className="font-semibold">{selectedPond.feedingFrequency || 0}x daily</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
             </div>
 
             {/* Real-time Sensor Data */}
             <div id="export-realtime" className="w-full">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Zap className="h-5 w-5 mr-2 text-cyan-600" />
-                  Real-time Sensor Data
-                </CardTitle>
-                <p className="text-sm text-gray-600">
-                  Live readings from {selectedPond.sensorId} •{" "}
-                  <span className={isOnline ? "text-green-600" : "text-red-600"}>
-                    {isOnline ? "Online" : "Offline"}
-                  </span>
-                  {error && <span className="ml-2 text-red-500">| (signal is aborted)</span>}
-                </p>
-              </CardHeader>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <Zap className="h-5 w-5 mr-2 text-cyan-600" />
+                    Real-time Sensor Data
+                  </CardTitle>
+                  <p className="text-sm text-gray-600">
+                    Live readings from {selectedPond.sensorId} •{" "}
+                    <span className={isOnline ? "text-green-600" : "text-red-600"}>
+                      {isOnline ? "Online" : "Offline"}
+                    </span>
+                    {error && <span className="ml-2 text-red-500">| (signal is aborted)</span>}
+                  </p>
+                </CardHeader>
 
-              <CardContent>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="text-center p-4 bg-gray-50 rounded-lg">
-                    <Thermometer className="h-6 w-6 mx-auto mb-2 text-green-600" />
-                    <p className="text-sm text-gray-600">Temperature</p>
-                    <p className="text-xl font-bold">
-                      {Number.isFinite(tempVal) ? `${tempVal.toFixed(1)} °C` : "—"}
-                    </p>
-                    <Badge
-                      className={`text-xs ${
-                        isOnline
-                          ? "bg-green-100 text-green-800"
-                          : "bg-red-100 text-red-800"
-                      }`}
-                    >
-                      {isOnline ? "Live" : "Offline"}
-                    </Badge>
+                <CardContent>
+                  {/* 3 cards now (Temp / pH / DO) */}
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    {/* Temperature */}
+                    <div className="text-center p-4 bg-gray-50 rounded-lg">
+                      <Thermometer className="h-6 w-6 mx-auto mb-2 text-green-600" />
+                      <p className="text-sm text-gray-600">Temperature</p>
+                      <p className="text-xs text-gray-500 mb-1">Ideal {IDEAL.temp}</p>
+                      <p className="text-xl font-bold">
+                        {Number.isFinite(tempVal) ? `${tempVal.toFixed(1)} °C` : "—"}
+                      </p>
+                      <Badge
+                        className={`text-xs ${isOnline ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
+                      >
+                        {isOnline ? "Live" : "Offline"}
+                      </Badge>
+                    </div>
 
+                    {/* pH */}
+                    <div className="text-center p-4 bg-gray-50 rounded-lg">
+                      <Droplets className="h-6 w-6 mx-auto mb-2 text-blue-600" />
+                      <p className="text-sm text-gray-600">pH Level</p>
+                      <p className="text-xs text-gray-500 mb-1">Ideal {IDEAL.ph}</p>
+                      <p className="text-xl font-bold">
+                        {Number.isFinite(phVal) ? phVal.toFixed(2) : "—"}
+                      </p>
+                      <Badge
+                        className={`text-xs ${isOnline ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
+                      >
+                        {isOnline ? "Live" : "Offline"}
+                      </Badge>
+                    </div>
+
+                    {/* Dissolved Oxygen */}
+                    <div className="text-center p-4 bg-gray-50 rounded-lg">
+                      <Zap className="h-6 w-6 mx-auto mb-2 text-purple-600" />
+                      <p className="text-sm text-gray-600">Dissolved Oxygen</p>
+                      <p className="text-xs text-gray-500 mb-1">Ideal {IDEAL.do}</p>
+                      <p className="text-xl font-bold">
+                        {Number.isFinite(doVal) ? `${doVal.toFixed(2)} mg/L` : "—"}
+                      </p>
+                      <Badge
+                        className={`text-xs ${isOnline ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
+                      >
+                        {isOnline ? "Live" : "Offline"}
+                      </Badge>
+                    </div>
                   </div>
 
-                  <div className="text-center p-4 bg-gray-50 rounded-lg">
-                    <Droplets className="h-6 w-6 mx-auto mb-2 text-blue-600" />
-                    <p className="text-sm text-gray-600">pH Level</p>
-                    <p className="text-xl font-bold">
-                      {Number.isFinite(phVal) ? phVal.toFixed(2) : "—"}
-                    </p>
-                    <Badge
-                      className={`text-xs ${
-                        isOnline
-                          ? "bg-green-100 text-green-800"
-                          : "bg-red-100 text-red-800"
-                      }`}
-                    >
-                      {isOnline ? "Live" : "Offline"}
-                    </Badge>
-
+                  <div className="mt-4 pt-4 border-t text-center">
+                    <RealtimeClock data={data} isOnline={isOnline} />
                   </div>
-
-                  <div className="text-center p-4 bg-gray-50 rounded-lg">
-                    <Zap className="h-6 w-6 mx-auto mb-2 text-purple-600" />
-                    <p className="text-sm text-gray-600">Dissolved Oxygen</p>
-                    <p className="text-xl font-bold">
-                      {Number.isFinite(doVal) ? `${doVal.toFixed(2)} mg/L` : "—"}
-                    </p>
-                    <Badge
-                      className={`text-xs ${
-                        isOnline
-                          ? "bg-green-100 text-green-800"
-                          : "bg-red-100 text-red-800"
-                      }`}
-                    >
-                      {isOnline ? "Live" : "Offline"}
-                    </Badge>
-                      </div>
-
-                  <div className="text-center p-4 bg-gray-50 rounded-lg">
-                    <Eye className="h-6 w-6 mx-auto mb-2 text-orange-600" />
-                    <p className="text-sm text-gray-600">TDS</p>
-                    <p className="text-xl font-bold">
-                      {Number.isFinite(tdsVal) ? `${Math.round(tdsVal)} ppm` : "—"}
-                    </p>
-                    <Badge
-                      className={`text-xs ${
-                        isOnline
-                          ? "bg-green-100 text-green-800"
-                          : "bg-red-100 text-red-800"
-                      }`}
-                    >
-                      {isOnline ? "Live" : "Offline"}
-                    </Badge>
-                      </div>
-                </div>
-
-                <div className="mt-4 pt-4 border-t text-center">
-                  <RealtimeClock data={data} isOnline={isOnline} />
-                </div>
-
-
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
             </div>
-
-
 
             {/* Harvest Prediction Dashboard */}
             <HarvestPredictionDashboard
@@ -330,10 +304,7 @@ export function DashboardWithPonds() {
             {/* Quick Actions */}
             <QuickActions
               pond={selectedPond}
-              // still fine to keep; subscription will catch changes too
-              onMortalityUpdate={() => {
-                // no-op; subscription handles it, but this keeps compatibility
-              }}
+              onMortalityUpdate={() => {}}
               onGrowthUpdate={() => setGrowthRefresh((prev) => prev + 1)}
             />
           </>

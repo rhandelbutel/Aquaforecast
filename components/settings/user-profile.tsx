@@ -2,7 +2,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useEffect, useRef, useMemo } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -21,7 +20,7 @@ export function UserProfile() {
   const { toast } = useToast()
 
   const [fullName, setFullName] = useState("")
-  const [phone, setPhone] = useState("") // digits-only
+  const [phone, setPhone] = useState("") // stored exactly as displayed (+639... or 09...)
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState("")
   const [error, setError] = useState("")
@@ -29,26 +28,31 @@ export function UserProfile() {
   const [isEditingPhone, setIsEditingPhone] = useState(false)
   const phoneRef = useRef<HTMLInputElement | null>(null)
 
-  const originalPhone = (userProfile?.phone ?? "").replace(/\D/g, "")
   const originalFullName = userProfile?.fullName ?? ""
+  const originalPhone = userProfile?.phone ?? ""
 
-  // helpers
-  const sanitizePhone = (v: string) => v.replace(/\D/g, "").slice(0, 11)
+  // === Helpers ===
+  const sanitizePhone = (v: string) => v.replace(/[^\d+]/g, "").slice(0, 13)
   const isPhoneEmpty = phone.length === 0
-  const isPhoneValid = isPhoneEmpty || /^[0-9]{11}$/.test(phone) // allow empty or exactly 11 digits
-  const phoneMissing = originalPhone.length === 0
+  const isPhoneValid =
+    isPhoneEmpty || /^\+639\d{9}$/.test(phone) || /^09\d{9}$/.test(phone)
+  const phoneMissing = !originalPhone
 
-  // sync from profile
+  // === Sync from profile ===
   useEffect(() => {
     if (!userProfile) return
+    let stored = userProfile.phone ?? ""
+    // always show in +63 format if saved that way
+    if (stored.startsWith("09")) {
+      stored = "+63" + stored.slice(1)
+    }
     setFullName(originalFullName)
-    setPhone(originalPhone)
-
-    const hasSavedPhone = originalPhone.length > 0
+    setPhone(stored)
+    const hasSavedPhone = stored.length > 0
     setIsEditingPhone(!hasSavedPhone)
-  }, [userProfile, originalFullName, originalPhone])
+  }, [userProfile, originalFullName])
 
-  // focus when enabling edit
+  // Auto-focus when enabling edit
   useEffect(() => {
     if (isEditingPhone) setTimeout(() => phoneRef.current?.focus(), 0)
   }, [isEditingPhone])
@@ -66,7 +70,7 @@ export function UserProfile() {
     if (!user || !hasChanges) return
 
     if (!isPhoneValid) {
-      setError("Phone number must be exactly 11 digits.")
+      setError("Invalid phone format. Use 09XXXXXXXXX or +639XXXXXXXXX.")
       return
     }
 
@@ -75,21 +79,30 @@ export function UserProfile() {
     setSuccess("")
 
     try {
-      const cleanedPhone = phone
+      let normalized = phone
+      // Convert to +63 format if starts with 0
+      if (normalized.startsWith("09")) {
+        normalized = "+63" + normalized.slice(1)
+      }
+
       const cleanedFullName = fullName.trim()
 
       const updates: UpdatableProfile = {}
       if (cleanedFullName.length > 0) updates.fullName = cleanedFullName
       else if ((userProfile?.fullName ?? "") !== "") updates.fullName = null
 
-      if (cleanedPhone.length > 0) updates.phone = cleanedPhone
+      if (normalized.length > 0) updates.phone = normalized
       else if ((userProfile?.phone ?? "") !== "") updates.phone = null
 
       await updateUserProfile(user.uid, updates)
 
       setSuccess("Profile updated successfully!")
-      toast({ title: "Saved", description: "Your profile changes have been saved." })
-      if (cleanedPhone.length > 0) setIsEditingPhone(false)
+      toast({
+        title: "Saved",
+        description: "Your profile changes have been saved.",
+      })
+      setPhone(normalized) // reflect +63 format immediately in field
+      if (normalized.length > 0) setIsEditingPhone(false)
     } catch (err) {
       console.error("Error updating profile:", err)
       setError("Failed to update profile. Please try again.")
@@ -113,7 +126,9 @@ export function UserProfile() {
         <form onSubmit={handleSubmit} className="space-y-4">
           {success && (
             <Alert className="border-green-200 bg-green-50">
-              <AlertDescription className="text-green-800">{success}</AlertDescription>
+              <AlertDescription className="text-green-800">
+                {success}
+              </AlertDescription>
             </Alert>
           )}
 
@@ -126,18 +141,32 @@ export function UserProfile() {
           {userProfile?.role === "user" && (
             <div className="space-y-2">
               <Label htmlFor="studentId">Student ID</Label>
-              <Input id="studentId" type="text" value={userProfile?.studentId ?? ""} disabled className="bg-gray-50" />
-              <p className="text-xs text-gray-500">Student ID cannot be changed</p>
+              <Input
+                id="studentId"
+                type="text"
+                value={userProfile?.studentId ?? ""}
+                disabled
+                className="bg-gray-50"
+              />
+              <p className="text-xs text-gray-500">
+                Student ID cannot be changed
+              </p>
             </div>
           )}
 
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
-            <Input id="email" type="email" value={user?.email || ""} disabled className="bg-gray-50" />
+            <Input
+              id="email"
+              type="email"
+              value={user?.email || ""}
+              disabled
+              className="bg-gray-50"
+            />
             <p className="text-xs text-gray-500">Email cannot be changed</p>
           </div>
 
-          {/* Phone with edit and REQUIRED badge if missing */}
+          {/* Phone number section */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label htmlFor="phone">Phone</Label>
@@ -164,28 +193,37 @@ export function UserProfile() {
                 ref={phoneRef}
                 id="phone"
                 type="tel"
-                inputMode="numeric"
+                inputMode="tel"
                 enterKeyHint="done"
-                pattern="^[0-9]{11}$"
-                maxLength={11}
-                autoComplete="tel"
-                placeholder="Enter your 11-digit phone number"
+                maxLength={13}
+                placeholder="+639XXXXXXXXX"
                 value={phone}
                 onChange={onPhoneChange}
                 disabled={showPhoneEditButton && !isEditingPhone}
                 aria-invalid={!isPhoneValid}
                 className={[
                   showPhoneEditButton && !isEditingPhone ? "pl-10" : "",
-                  !isPhoneValid ? "border-red-500 focus-visible:ring-red-500" : ""
+                  !isPhoneValid
+                    ? "border-red-500 focus-visible:ring-red-500"
+                    : "",
                 ].join(" ")}
               />
             </div>
-            <p className={`text-xs ${!isPhoneValid ? "text-red-600" : phoneMissing ? "text-red-600" : "text-gray-500"}`}>
+
+            <p
+              className={`text-xs ${
+                !isPhoneValid
+                  ? "text-red-600"
+                  : phoneMissing
+                  ? "text-red-600"
+                  : "text-gray-500"
+              }`}
+            >
               {showPhoneEditButton && !isEditingPhone
                 ? "Tap the pencil to edit your saved number"
                 : phoneMissing
-                  ? "Add your 11-digit phone number (e.g., 09XXXXXXXXX) to complete your profile."
-                  : "Only digits allowed. Must be exactly 11 digits (e.g., 09XXXXXXXXX)."}
+                ? "Enter your number (09XXXXXXXXX). It will be saved as +639XXXXXXXXX."
+                : "You can type 09XXXXXXXXX or +639XXXXXXXXX. It will display in +63 format after saving."}
             </p>
           </div>
 

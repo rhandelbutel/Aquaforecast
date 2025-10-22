@@ -54,6 +54,7 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
   const [missedOpen, setMissedOpen] = useState(false)
   const [confirmEarlyOpen, setConfirmEarlyOpen] = useState(false)
   const [confirmAmountOpen, setConfirmAmountOpen] = useState(false)
+  const [tooEarlyOpen, setTooEarlyOpen] = useState(false) // 👈 NEW: restriction popup
   const [pendingEarly, setPendingEarly] = useState<{ fedAt: Date; grams: number } | null>(null)
   const [pendingAmount, setPendingAmount] = useState<{ fedAt: Date; grams: number } | null>(null)
 
@@ -211,7 +212,7 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
         reason: "manual",
       })
 
-      // ⬇️ NEW: push a 5-min deviation insight (needs suggested amount too)
+      // ⬇️ keep your insight hook
       try {
         await pushFeedingVarianceInsight(
           sharedPondId,
@@ -244,13 +245,25 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
       return
     }
 
-    // too-early (only if there is a remaining scheduled slot after now)
+    // early logic against the NEXT schedule time
     const now = new Date()
-    const early = nextSlot && now < nextSlot && fedAt.getTime() < nextSlot.getTime()
-    if (early) {
-      setPendingEarly({ fedAt, grams })
-      setConfirmEarlyOpen(true)
-      return
+    const early = !!nextSlot && now < nextSlot && fedAt.getTime() <= now.getTime()
+
+    if (early && nextSlot) {
+      const minutesUntilNext = Math.ceil((nextSlot.getTime() - now.getTime()) / 60000)
+
+      // 👇 NEW: if > 60 minutes early -> restriction popup
+      if (minutesUntilNext > 60) {
+        setTooEarlyOpen(true)
+        return
+      }
+
+      // 👇 existing behavior: 0–60 minutes early -> confirmation
+      if (minutesUntilNext > 0) {
+        setPendingEarly({ fedAt, grams })
+        setConfirmEarlyOpen(true)
+        return
+      }
     }
 
     if (perFeedingGrams != null && grams !== perFeedingGrams) {
@@ -368,7 +381,7 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
                 </div>
               </div>
 
-              {/* ---- Alerts moved here (just above buttons) ---- */}
+              {/* Alerts */}
               {error && (
                 <Alert variant="destructive" className="mt-2">
                   <AlertDescription>{error}</AlertDescription>
@@ -411,7 +424,22 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
         </DialogContent>
       </Dialog>
 
-      {/* Too-early confirmation */}
+      {/* Too-early restriction ( > 60 min ) */}
+      <Dialog open={tooEarlyOpen} onOpenChange={setTooEarlyOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Too early to log</DialogTitle></DialogHeader>
+          <div className="text-sm">
+            {nextSlot
+              ? <>You can only feed within <b>60 minutes</b> before the next schedule. Next time is <b>{fmtTimePH(nextSlot)}</b>.</>
+              : <>You can only feed within 60 minutes before the next scheduled time.</>}
+          </div>
+          <DialogFooter className="mt-4">
+            <Button onClick={() => setTooEarlyOpen(false)}>OK</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 0–60 min early confirmation */}
       <Dialog open={confirmEarlyOpen} onOpenChange={setConfirmEarlyOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Log earlier than schedule?</DialogTitle></DialogHeader>
@@ -438,7 +466,7 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
         </DialogContent>
       </Dialog>
 
-      {/* Amount confirmation */}
+      {/* Amount confirmation (unchanged) */}
       <Dialog open={confirmAmountOpen} onOpenChange={setConfirmAmountOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Confirm feeding amount</DialogTitle></DialogHeader>
