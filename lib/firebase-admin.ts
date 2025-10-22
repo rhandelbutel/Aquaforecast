@@ -1,6 +1,7 @@
 // lib/firebase-admin.ts
 import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
+import { startFeedingAlertCron } from "@/lib/utils/feeding-alert-cron";
 /**
  * Server-only Firebase initialization using a service account.
  * Safe to import in Next.js API routes.
@@ -19,3 +20,8 @@ const app = apps.length
     });
 
 export const adminDb = getFirestore(app);
+
+if (process.env.NODE_ENV === "development") {
+  // Run cron job automatically while developing
+  startFeedingAlertCron();
+}

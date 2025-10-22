@@ -4,6 +4,7 @@ import { Inter } from "next/font/google"
 import { Suspense } from "react"
 import "./globals.css"
 import { AppProviders } from "./providers"
+import "@/lib/server-init";
 
 const inter = Inter({ subsets: ["latin"] })
 
