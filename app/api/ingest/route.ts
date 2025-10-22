@@ -1,7 +1,31 @@
+// ✅ Make sure this route always runs on the Node runtime (not Edge)
+//    and is never prerendered at build (so env vars are read at runtime).
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+// (Optional but handy) If your project uses regions, you can pin it:
+// export const preferredRegion = 'hkg1'; // or remove this line
+
 import { NextRequest, NextResponse } from "next/server";
+// This import should export an *already-initialized* admin app/db,
+// where the private_key is fixed with .replace(/\\n/g, '\n').
+// (See note below for what to put in "@/lib/firebase-admin")
 import { adminDb } from "@/lib/firebase-admin";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { DateTime } from "luxon";
+
+// (Optional) Handle CORS preflight if you call this from a mobile app / different origin
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Max-Age": "86400",
+    },
+  });
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -94,7 +118,10 @@ export async function POST(req: NextRequest) {
     });
 
     console.log("✅ Transaction complete");
-    return NextResponse.json({ ok: true });
+
+    // (Optional) add CORS if calling from a different origin
+    const headers = new Headers({ "Access-Control-Allow-Origin": "*" });
+    return new NextResponse(JSON.stringify({ ok: true }), { status: 200, headers });
   } catch (e: any) {
     console.error("🔥 Ingest route error:", e);
     return NextResponse.json({ ok: false, error: e?.message ?? "ingest error" }, { status: 500 });
