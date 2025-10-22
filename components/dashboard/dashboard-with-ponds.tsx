@@ -5,7 +5,7 @@ import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Fish, Plus, Thermometer, Droplets, Zap, Eye } from "lucide-react"
+import { Fish, Plus, Thermometer, Droplets, Zap } from "lucide-react" 
 import { Badge } from "@/components/ui/badge"
 import { AddPondModal } from "../ponds/add-pond-modal"
 import { usePonds } from "@/lib/pond-context"
@@ -19,12 +19,11 @@ import {
 } from "@/lib/mortality-service"
 import { useAquaSensors } from "@/hooks/useAquaSensors"
 
-// 🔎 Ideal ranges to display under each sensor title
+// Ideal ranges to display under each sensor title (TDS removed)
 const IDEAL = {
   temp: "29–31 °C",
   ph: "6.5–9.5",
   do: "3–5 mg/L",
-  tds: "100–400 ppm",
 }
 
 export function DashboardWithPonds() {
@@ -44,7 +43,7 @@ export function DashboardWithPonds() {
   const tempVal = data?.temp ?? NaN
   const phVal = data?.ph ?? NaN
   const doVal = data?.do ?? NaN
-  const tdsVal = data?.tds ?? NaN
+  // const tdsVal = data?.tds ?? NaN // removed
 
   const [showAddModal, setShowAddModal] = useState(false)
 
@@ -235,7 +234,8 @@ export function DashboardWithPonds() {
                 </CardHeader>
 
                 <CardContent>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {/* 3 cards now (Temp / pH / DO) */}
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                     {/* Temperature */}
                     <div className="text-center p-4 bg-gray-50 rounded-lg">
                       <Thermometer className="h-6 w-6 mx-auto mb-2 text-green-600" />
@@ -273,21 +273,6 @@ export function DashboardWithPonds() {
                       <p className="text-xs text-gray-500 mb-1">Ideal {IDEAL.do}</p>
                       <p className="text-xl font-bold">
                         {Number.isFinite(doVal) ? `${doVal.toFixed(2)} mg/L` : "—"}
-                      </p>
-                      <Badge
-                        className={`text-xs ${isOnline ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}
-                      >
-                        {isOnline ? "Live" : "Offline"}
-                      </Badge>
-                    </div>
-
-                    {/* TDS */}
-                    <div className="text-center p-4 bg-gray-50 rounded-lg">
-                      <Eye className="h-6 w-6 mx-auto mb-2 text-orange-600" />
-                      <p className="text-sm text-gray-600">TDS</p>
-                      <p className="text-xs text-gray-500 mb-1">Ideal {IDEAL.tds}</p>
-                      <p className="text-xl font-bold">
-                        {Number.isFinite(tdsVal) ? `${Math.round(tdsVal)} ppm` : "—"}
                       </p>
                       <Badge
                         className={`text-xs ${isOnline ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}

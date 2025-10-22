@@ -1,4 +1,4 @@
-// app/(wherever)/water-quality/parameter-cards.tsx
+// components/water-quality/parameter-cards.tsx
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,7 +12,7 @@ interface ParameterCardsProps {
   pondId: string;
 }
 
-const ONLINE_GRACE_MS = 20_000; // consider offline if no update for 20s
+const ONLINE_GRACE_MS = 50_000; // consider offline if no update for 20s
 
 const getTrendIcon = (trend: "up" | "down" | "stable") => {
   switch (trend) {
@@ -66,11 +66,10 @@ export function ParameterCards({ pondId }: ParameterCardsProps) {
       tempMin: 28, tempMax: 31,
       phMin: 6.5, phMax: 9.0,
       doMin: 3,   doMax: 5,
-      tdsMin: 100, tdsMax: 400,
     };
 
-  // 1) live current from ESP32 (LAN)
-  const [current, setCurrent] = useState<{ ph: number; temp: number; do: number; tds: number } | null>(null);
+  // 1) live current from ESP32 (LAN) — TDS removed
+  const [current, setCurrent] = useState<{ ph: number; temp: number; do: number } | null>(null);
 
   // track last successful fetch time
   const [lastSeen, setLastSeen] = useState<number | null>(null);
@@ -99,10 +98,9 @@ export function ParameterCards({ pondId }: ParameterCardsProps) {
         const j = await res.json();
         if (!mounted) return;
         setCurrent({
-          ph: Number(j.ph),
-          temp: Number(j.temp),
-          do: Number(j.do),
-          tds: Number(j.tds),
+          ph: Number(j.pH),
+          temp: Number(j.tempC),
+          do: Number(j.DOmgL),
         });
         setLastSeen(Date.now()); // mark successful arrival
       } catch {
@@ -128,7 +126,7 @@ export function ParameterCards({ pondId }: ParameterCardsProps) {
   };
 
   const cards = useMemo(() => {
-    const cur = current ?? { ph: NaN, temp: NaN, do: NaN, tds: NaN };
+    const cur = current ?? { ph: NaN, temp: NaN, do: NaN };
 
     const computeStatus = (
       v: number, min: number, max: number
@@ -138,14 +136,13 @@ export function ParameterCards({ pondId }: ParameterCardsProps) {
     const phStatus  = computeStatus(cur.ph,   prefs.phMin,   prefs.phMax);
     const tStatus   = computeStatus(cur.temp, prefs.tempMin, prefs.tempMax);
     const doStatus  = computeStatus(cur.do,   prefs.doMin,   prefs.doMax);
-    const tdsStatus = computeStatus(cur.tds,  prefs.tdsMin,  prefs.tdsMax);
 
     return [
       {
         key: "ph",
         name: "pH Level",
         current: isFinite(cur.ph) ? cur.ph.toFixed(2) : "—",
-        previous: yesterday.ph != null ? yesterday.ph.toFixed(2) : "—",
+        previous: today.ph != null && yesterday.ph != null ? yesterday.ph.toFixed(2) : "—",
         trend: trendOf(today.ph, yesterday.ph),
         status: phStatus,
         range: `${prefs.phMin}-${prefs.phMax}`,
@@ -154,7 +151,7 @@ export function ParameterCards({ pondId }: ParameterCardsProps) {
         key: "temp",
         name: "Temperature",
         current: isFinite(cur.temp) ? `${cur.temp.toFixed(2)}°C` : "—",
-        previous: yesterday.temp != null ? `${yesterday.temp.toFixed(2)}°C` : "—",
+        previous: today.temp != null && yesterday.temp != null ? `${yesterday.temp.toFixed(2)}°C` : "—",
         trend: trendOf(today.temp, yesterday.temp),
         status: tStatus,
         range: `${prefs.tempMin}-${prefs.tempMax}°C`,
@@ -163,30 +160,19 @@ export function ParameterCards({ pondId }: ParameterCardsProps) {
         key: "do",
         name: "Dissolved Oxygen",
         current: isFinite(cur.do) ? `${cur.do.toFixed(2)} mg/L` : "—",
-        previous: yesterday.do != null ? `${yesterday.do.toFixed(2)} mg/L` : "—",
+        previous: today.do != null && yesterday.do != null ? `${yesterday.do.toFixed(2)} mg/L` : "—",
         trend: trendOf(today.do, yesterday.do),
         status: doStatus,
         range: `${prefs.doMin}-${prefs.doMax} mg/L`,
       },
-      {
-        key: "tds",
-        name: "TDS",
-        current: isFinite(cur.tds) ? `${cur.tds.toFixed(0)} ppm` : "—",
-        previous: yesterday.tds != null ? `${yesterday.tds.toFixed(0)} ppm` : "—",
-        trend: trendOf(today.tds, yesterday.tds),
-        status: tdsStatus,
-        range: `${prefs.tdsMin}-${prefs.tdsMax} ppm`,
-      },
     ] as const;
-  // include `tick` so the memo recalculates as time passes
+    // include `tick` so the memo recalculates as time passes
   }, [current, today, yesterday, prefs, online, tick]);
 
   return (
     <div id="wq-cards" data-online={online ? "1" : "0"}>
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      {cards.map((param) => {
-        const TrendIcon = getTrendIcon(param.trend as any);
-        return (
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+        {cards.map((param) => (
           <Card key={param.key}>
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
@@ -215,9 +201,8 @@ export function ParameterCards({ pondId }: ParameterCardsProps) {
               </p>
             </CardContent>
           </Card>
-        );
-      })}
-    </div>
+        ))}
+      </div>
     </div>
   );
 }

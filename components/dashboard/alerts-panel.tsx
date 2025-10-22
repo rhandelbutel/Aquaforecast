@@ -28,8 +28,8 @@ const RANGES = {
   ph:   { min: 6.5, max: 9.0, label: "6.5–9.0" },
   temp: { min: 28,  max: 31,  label: "28–31°C" },
   do:   { min: 3,   max: 5,   label: "3–5 mg/L" },
-  tds:  { min: 100, max: 400, label: "100–400 ppm" },
 }
+// ================================================================
 
 // IMPORTANT: use only the platform-supported types
 type AlertType = "warning" | "error"
@@ -74,12 +74,10 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
   const phVal   = data?.ph   ?? NaN
   const tempVal = data?.temp ?? NaN
   const doVal   = data?.do   ?? NaN
-  const tdsVal  = data?.tds  ?? NaN
 
   const phStatus   = classify(phVal,   RANGES.ph.min,   RANGES.ph.max)
   const tempStatus = classify(tempVal, RANGES.temp.min, RANGES.temp.max)
   const doStatus   = classify(doVal,   RANGES.do.min,   RANGES.do.max)
-  const tdsStatus  = classify(tdsVal,  RANGES.tds.min,  RANGES.tds.max)
 
   // 🔕 snoozes
   const [dismissedUntil, setDismissedUntil] = useState<SnoozeMap>({})
@@ -121,7 +119,7 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
     }
 
     const addParam = (
-      key: "ph" | "temp" | "do" | "tds",
+      key: "ph" | "temp" | "do",
       label: string,
       value: number,
       status: "optimal" | "warning" | "error"
@@ -130,7 +128,7 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
       const range = RANGES[key]
       const dir = describeDir(value, range.min, range.max)
       const pretty = Number.isFinite(value)
-        ? value.toFixed(key === "ph" ? 2 : key === "tds" ? 0 : 1)
+        ? value.toFixed(key === "ph" ? 2 : 1)
         : "—"
 
       if (status === "warning") {
@@ -157,10 +155,9 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
     addParam("ph",   "pH",               phVal,   phStatus)
     addParam("temp", "Temperature (°C)", tempVal, tempStatus)
     addParam("do",   "Dissolved Oxygen", doVal,   doStatus)
-    addParam("tds",  "TDS (ppm)",        tdsVal,  tdsStatus)
 
     return list
-  }, [isOnline, error, phVal, tempVal, doVal, tdsVal, phStatus, tempStatus, doStatus, tdsStatus])
+  }, [isOnline, error, phVal, tempVal, doVal, phStatus, tempStatus, doStatus])
 
   // 🔴 MATERIALIZE to Firestore whenever baseAlerts change
   useEffect(() => {
@@ -243,7 +240,7 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
             <div>
               <CardTitle className="text-lg font-semibold">System Alerts</CardTitle>
               <p className="text-sm text-gray-600">
-                Live notifications from sensors (pH, Temperature, DO, TDS) and device status
+                Live notifications from sensors (pH, Temperature, DO) and device status
               </p>
             </div>
             {visibleAlerts.length > 0 && (

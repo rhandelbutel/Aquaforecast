@@ -22,7 +22,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 
 type SeriesPoint = { time: string; ts: number; value: number | null };
 
-const ONLINE_GRACE_MS = 20_000;
+const ONLINE_GRACE_MS = 50_000;
 
 function formatTwoDecimals(v: unknown) {
   if (typeof v === "number" && isFinite(v)) return v.toFixed(2);
@@ -68,7 +68,6 @@ function useRolling24hSeries() {
     temp: [] as SeriesPoint[],
     ph: [] as SeriesPoint[],
     do: [] as SeriesPoint[],
-    tds: [] as SeriesPoint[],
   });
 
   const [lastSeen, setLastSeen] = useState<number | null>(null);
@@ -98,9 +97,8 @@ function useRolling24hSeries() {
       const toNum = (x: any) => (isFinite(Number(x)) ? Number(x) : null);
       return {
         temp: push(prev.temp, toNum(data.temp)),
-        ph: push(prev.ph, toNum(data.ph)),
-        do: push(prev.do, toNum(data.do)),
-        tds: push(prev.tds, toNum(data.tds)),
+        ph:   push(prev.ph,   toNum(data.ph)),
+        do:   push(prev.do,   toNum(data.do)),
       };
     });
   }, [data]);
@@ -109,9 +107,8 @@ function useRolling24hSeries() {
 
   const yDomains = useMemo(() => ({
     temp: ['dataMin - 1', 'dataMax + 1'] as any,
-    ph: [6.0, 9.5] as any,
-    do: ['dataMin - 0.5', 'dataMax + 0.5'] as any,
-    tds: ['dataMin - 10', 'dataMax + 10'] as any,
+    ph:   [6.0, 9.5] as any,
+    do:   ['dataMin - 0.5', 'dataMax + 0.5'] as any,
   }), []);
 
   const lastAgo = useMemo(() => {
@@ -235,10 +232,9 @@ export function WaterQualityCharts({ pondId }: { pondId: string }) {
     tempMin: 28, tempMax: 31,
     phMin: 6.5, phMax: 9.0,
     doMin: 3,   doMax: 5,
-    tdsMin: 100, tdsMax: 400
   };
 
-  const { temp, ph, do: doSeries, tds, yDomains, online, lastAgo } = useRolling24hSeries();
+  const { temp, ph, do: doSeries, yDomains, online, lastAgo } = useRolling24hSeries();
 
   return (
     // NOTE: expose online flag for exporter to read
@@ -249,7 +245,7 @@ export function WaterQualityCharts({ pondId }: { pondId: string }) {
         {/* add ids so each can be picked */}
         <div id="chart-temp">
           <Chart
-            title="Temperature (Live, 24h)"
+            title="Temperature (Live)"
             data={temp}
             yDomain={yDomains.temp}
             min={prefs.tempMin}
@@ -262,7 +258,7 @@ export function WaterQualityCharts({ pondId }: { pondId: string }) {
 
         <div id="chart-ph">
           <Chart
-            title="pH Level (Live, 24h)"
+            title="pH Level (Live)"
             data={ph}
             yDomain={yDomains.ph}
             min={prefs.phMin}
@@ -274,7 +270,7 @@ export function WaterQualityCharts({ pondId }: { pondId: string }) {
 
         <div id="chart-do">
           <Chart
-            title="Dissolved Oxygen (Live, 24h)"
+            title="Dissolved Oxygen (Live)"
             data={doSeries}
             yDomain={yDomains.do}
             min={prefs.doMin}
@@ -282,19 +278,6 @@ export function WaterQualityCharts({ pondId }: { pondId: string }) {
             unit="mg/L"
             offline={!online}
             warnMarginPct={0.12}
-          />
-        </div>
-
-        <div id="chart-tds">
-          <Chart
-            title="TDS (Live, 24h)"
-            data={tds}
-            yDomain={yDomains.tds}
-            min={prefs.tdsMin}
-            max={prefs.tdsMax}
-            unit="ppm"
-            offline={!online}
-            warnMarginPct={0.10}
           />
         </div>
       </div>

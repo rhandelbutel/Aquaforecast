@@ -1,3 +1,4 @@
+// lib/hooks/useAnalytics24h.ts
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { db } from "@/lib/firebase";
@@ -7,7 +8,7 @@ import { todayKeyManila } from "../time"; // ⬅️ relative import
 const BUCKETS = ["00", "04", "08", "12", "16", "20"] as const;
 const TICKS = ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00", "24:00"] as const;
 
-type SumMap = { ph?: number; temp?: number; do?: number; tds?: number };
+type SumMap = { ph?: number; temp?: number; do?: number }; // TDS removed
 type Bucket = { count?: number; sum?: SumMap };
 type Buckets = Record<string, Bucket>;
 type DocLike = { buckets4h?: Buckets } & Record<string, any>;
@@ -51,19 +52,19 @@ export function useAnalytics24h(pondId: string) {
 
   useEffect(() => {
     const todayKey = todayKeyManila();
-    const unsub = onSnapshot(doc(db, `ponds/${pondId}/dailyMetrics/${todayKey}`), s => {
+    const unsub = onSnapshot(doc(db, `ponds/${pondId}/dailyMetrics/${todayKey}`), (s) => {
       setRaw(s.exists() ? (s.data() as DocLike) : null);
     });
     return () => unsub();
   }, [pondId]);
 
-  const build = (key: "ph" | "temp" | "do" | "tds") => {
+  const build = (key: "ph" | "temp" | "do") => {
     const buckets = normalizeBuckets(raw);
 
     const avgFor = (bk: string): number | null => {
       const b = buckets[bk];
       if (!b || !b.count) return null;
-      const sum = b.sum?.[key] ?? 0;
+      const sum = (b.sum?.[key] as number | undefined) ?? 0;
       return sum / b.count;
     };
 
@@ -77,17 +78,19 @@ export function useAnalytics24h(pondId: string) {
       { time: "12:00", value: y[3] ?? null },
       { time: "16:00", value: y[4] ?? null },
       { time: "20:00", value: y[5] ?? null },
-      { time: "24:00", value: (y[5] ?? null) }, // repeat last bucket
+      { time: "24:00", value: y[5] ?? null }, // repeat last bucket
     ];
   };
 
   const ticks = useMemo(() => [...TICKS], []);
 
-  return useMemo(() => ({
-    ph: build("ph"),
-    temp: build("temp"),
-    do: build("do"),
-    tds: build("tds"),
-    ticks,
-  }), [raw, ticks]);
+  return useMemo(
+    () => ({
+      ph: build("ph"),
+      temp: build("temp"),
+      do: build("do"),
+      ticks,
+    }),
+    [raw, ticks]
+  );
 }

@@ -29,7 +29,6 @@ const generateCurrentReadings = () => ({
   temperature: (24 + Math.random() * 2).toFixed(1) + "°C",
   ph: (7.0 + Math.random() * 0.5).toFixed(1),
   oxygen: (8.0 + Math.random() * 0.5).toFixed(1) + " mg/L",
-  tds: (440 + Math.random() * 20).toFixed(0) + " ppm",
   status: Math.random() > 0.8 ? "warning" : "optimal",
 })
 
@@ -188,7 +187,6 @@ export function AdminPondUserView() {
 
                 <div className="text-sm text-gray-600">
                   <p>Oxygen: {readings.oxygen}</p>
-                  <p>TDS: {readings.tds}</p>
                   <div className="flex items-center mt-2">
                     <Fish className="h-4 w-4 mr-1" />
                     <span>{pond.initialFishCount.toLocaleString()} fish</span>

@@ -1,4 +1,3 @@
-// app/ponds/page.tsx
 "use client"
 
 import { useCallback, useState } from "react"
@@ -6,6 +5,7 @@ import { usePonds } from "@/lib/pond-context"
 import { EmptyPonds } from "@/components/ponds/empty-ponds"
 import { PondsWithData } from "@/components/ponds/ponds-with-data"
 import HarvestModal from "@/components/admin/harvest-modal"
+import StartStockingModal from "@/components/admin/start-stocking-modal" // ✅ new modal
 import { useAuth } from "@/lib/auth-context"
 import { isAdmin } from "@/lib/user-service"
 import { GrowthService } from "@/lib/growth-service"
@@ -24,6 +24,7 @@ export default function PondsPage() {
   const { user } = useAuth()
 
   const [harvestOpen, setHarvestOpen] = useState(false)
+  const [stockingOpen, setStockingOpen] = useState(false) // ✅ new state for modal
 
   // Info dialog (single “OK”)
   const [infoOpen, setInfoOpen] = useState(false)
@@ -50,7 +51,6 @@ export default function PondsPage() {
   }, [])
 
   const handleHarvestClick = useCallback(async () => {
-    // must be admin
     if (!user || !isAdmin(user.email || "")) {
       openInfo("Restricted", "Only administrators can perform harvest.")
       return
@@ -69,7 +69,6 @@ export default function PondsPage() {
       return
     }
 
-    // Block if not harvestable
     if (currentABW < 100) {
       openInfo(
         "Not Harvestable",
@@ -78,7 +77,6 @@ export default function PondsPage() {
       return
     }
 
-    // If ≥100g but below target — ask to continue
     if (typeof target === "number" && currentABW < target) {
       openConfirm(
         "Below Target Weight",
@@ -88,7 +86,6 @@ export default function PondsPage() {
       return
     }
 
-    // Otherwise proceed
     setHarvestOpen(true)
   }, [user, ponds, openInfo, openConfirm])
 
@@ -105,12 +102,29 @@ export default function PondsPage() {
 
   if (ponds.length === 0) return <EmptyPonds />
 
+  const pond = ponds[0]
+
   return (
     <>
-      {/* Header has the existing Harvest button; we pass our guarded handler */}
+      {/* Existing Pond Data & Harvest */}
       <PondsWithData ponds={ponds} onClickHarvest={handleHarvestClick} />
 
       <HarvestModal open={harvestOpen} onOpenChange={setHarvestOpen} ponds={ponds} />
+
+      {/* ✅ Show Start New Stocking button if pond is empty */}
+      {pond?.fishCount === 0 && (
+        <div className="flex justify-center mt-6">
+          <Button onClick={() => setStockingOpen(true)}>Start New Stocking</Button>
+        </div>
+      )}
+
+      {/* ✅ New Start Stocking Modal */}
+      <StartStockingModal
+        open={stockingOpen}
+        onOpenChange={setStockingOpen}
+        pond={pond}
+        onDone={() => window.location.reload()}
+      />
 
       {/* Info dialog */}
       <Dialog open={infoOpen} onOpenChange={setInfoOpen}>

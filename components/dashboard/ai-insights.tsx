@@ -9,10 +9,10 @@ import {
   subscribeDashInsights,
   resolveDashInsight,
   type DashInsight,
-  type LiveReading,
+  // NOTE: don't import LiveReading to avoid forcing a 'tds' field
   type PondLite,
   detectRealtimeFindingsDash,
-  resolveAllWaterInsightsForOffline, // make sure this is exported from the service
+  resolveAllWaterInsightsForOffline,
 } from "@/lib/dash-insights-service";
 import { useAquaSensors } from "@/hooks/useAquaSensors";
 
@@ -29,7 +29,8 @@ const badgeFor = (sev: DashInsight["severity"]) =>
 const ESP32_BASE =
   (process.env.NEXT_PUBLIC_SENSORS_BASE as string | undefined) || "http://aquamon.local";
 
-const DIFF = { temp: 0.5, ph: 0.2, do: 0.2, tds: 10 };
+// TDS removed
+const DIFF = { temp: 0.5, ph: 0.2, do: 0.2 };
 
 // Change this to 10000 if you want 10s
 const OFFLINE_CLEAR_DELAY_MS = 5_000;
@@ -56,7 +57,8 @@ export function AIInsightsCard({ pondId, pondName }: { pondId: string; pondName?
 
   const { data, isOnline } = useAquaSensors({ baseUrl: ESP32_BASE, intervalMs: 1000 });
 
-  const lastSentRef = useRef<{ ts: number; temp: number; ph: number; do: number; tds: number } | null>(null);
+  
+  const lastSentRef = useRef<{ ts: number; temp: number; ph: number; do: number } | null>(null);
 
   useEffect(() => {
     if (!pondId || !isOnline || !data) return;
@@ -69,27 +71,26 @@ export function AIInsightsCard({ pondId, pondName }: { pondId: string; pondName?
       Math.abs((data.temp ?? NaN) - (last.temp ?? NaN)) >= DIFF.temp ||
       Math.abs((data.ph ?? NaN) - (last.ph ?? NaN)) >= DIFF.ph ||
       Math.abs((data.do ?? NaN) - (last.do ?? NaN)) >= DIFF.do ||
-      Math.abs((data.tds ?? NaN) - (last.tds ?? NaN)) >= DIFF.tds ||
       now - (last.ts || 0) >= 3000;
 
     if (!changedEnough) return;
 
-    const reading: LiveReading = {
+    // Build reading without TDS
+    const reading = {
       ts: now,
       temp: Number(data.temp ?? NaN),
       ph: Number(data.ph ?? NaN),
       do: Number(data.do ?? NaN),
-      tds: Number(data.tds ?? NaN),
     };
 
     const pondLite: PondLite = { id: pondId, name: pondName };
-    void detectRealtimeFindingsDash(pondLite, reading).catch(() => {});
+    
+    void detectRealtimeFindingsDash(pondLite, reading as any).catch(() => {});
 
-    lastSentRef.current = { ts: now, temp: reading.temp, ph: reading.ph, do: reading.do, tds: reading.tds };
+    lastSentRef.current = { ts: now, temp: reading.temp, ph: reading.ph, do: reading.do };
   }, [pondId, pondName, data, isOnline]);
 
   // --- OFFLINE CLEAR WITH INITIAL-STATE COVERAGE ---
-  // If we load the page and it's already offline, we still want to clear after the delay.
   const offlineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!pondId) return;

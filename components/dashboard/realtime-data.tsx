@@ -1,5 +1,7 @@
+// components/dashboard/realtime-data.tsx
 "use client";
-import { Thermometer, Droplets, Zap, Eye } from "lucide-react";
+
+import { Thermometer, Droplets, Zap } from "lucide-react";
 import type { UnifiedPond } from "@/lib/pond-context";
 import { useAquaSensors } from "@/hooks/useAquaSensors";
 
@@ -10,12 +12,11 @@ const ESP32_BASE =
   (process.env.NEXT_PUBLIC_SENSORS_BASE as string | undefined) || "http://aquamon.local";
 // ===============================================================
 
-// Ranges you’ve been using in your app (tweak as needed)
+// Ranges you’ve been using in your app (tweak as needed) — TDS removed
 const RANGES = {
   ph:   { min: 6.5, max: 9.0, label: "6.5–9.0" },
   temp: { min: 28,  max: 31,  label: "22–28°C" },
-  do:   { min: 3,   max: 5,  label: "3–5 mg/L" },
-  tds:  { min: 100, max: 400, label: "300–500 ppm" },
+  do:   { min: 3,   max: 5,   label: "3–5 mg/L" },
 };
 
 type Status = "optimal" | "warning" | "danger";
@@ -47,7 +48,6 @@ function statusIcon(param: string, status: Status) {
     case "temperature":     return <Thermometer className={`h-4 w-4 ${iconClass}`} />;
     case "ph":              return <Droplets     className={`h-4 w-4 ${iconClass}`} />;
     case "dissolvedOxygen": return <Zap          className={`h-4 w-4 ${iconClass}`} />;
-    case "tds":             return <Eye          className={`h-4 w-4 ${iconClass}`} />;
     default:                return <Droplets     className={`h-4 w-4 ${iconClass}`} />;
   }
 }
@@ -57,8 +57,6 @@ interface RealtimeDataProps {
 }
 
 export function RealtimeData({ pond }: RealtimeDataProps) {
-  
-
   // Poll the ESP32 every second
   const { data, error, isOnline } = useAquaSensors({
     baseUrl: ESP32_BASE,
@@ -69,11 +67,12 @@ export function RealtimeData({ pond }: RealtimeDataProps) {
   const tempVal = data?.temp ?? NaN;
   const phVal   = data?.ph   ?? NaN;
   const doVal   = data?.do   ?? NaN;
-  const tdsVal  = data?.tds  ?? NaN;
 
   const tempStatus = Number.isFinite(tempVal) ? classify(tempVal, RANGES.temp.min, RANGES.temp.max) : "danger";
   const phStatus   = Number.isFinite(phVal)   ? classify(phVal,   RANGES.ph.min,   RANGES.ph.max)   : "danger";
   const doStatus   = Number.isFinite(doVal)   ? classify(doVal,   RANGES.do.min,   RANGES.do.max)   : "danger";
-  const tdsStatus  = Number.isFinite(tdsVal)  ? classify(tdsVal,  RANGES.tds.min,  RANGES.tds.max)  : "danger";
 
+  // If you had UI below (cards/badges), use tempVal/phVal/doVal + their statuses.
+  // This stub returns null so removing TDS won’t break the build if you’re refactoring UI separately.
+  return null;
 }

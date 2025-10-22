@@ -1,3 +1,4 @@
+// lib/growth-service.ts
 import {
   collection,
   doc,

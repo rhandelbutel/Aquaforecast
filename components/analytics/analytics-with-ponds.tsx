@@ -1,4 +1,3 @@
-// components/analytics/analytics-with-ponds.tsx
 "use client"
 
 import { AnalyticsExport } from "./analytics-export"
@@ -6,7 +5,7 @@ import { HarvestForecast } from "./harvest-forecast"
 import { FeedingHistory } from "./feeding-history"
 import { GrowthCharts } from "./growth-charts"
 import { EfficiencyTips } from "@/components/analytics/efficiency-tips"
-import { AnalyticsSummaryExport } from "./analytics-summary-export"   // ✅ NEW
+import { AnalyticsSummaryExport } from "./analytics-summary-export"
 import type { UnifiedPond } from "@/lib/pond-context"
 
 interface AnalyticsWithPondsProps {
@@ -16,12 +15,14 @@ interface AnalyticsWithPondsProps {
 export function AnalyticsWithPonds({ ponds }: AnalyticsWithPondsProps) {
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Growth Analytics</h1>
           <p className="text-gray-600 mt-1">Predictive insights for optimal harvest timing</p>
         </div>
-        <AnalyticsExport />
+        <div className="self-start sm:self-auto">
+          <AnalyticsExport />
+        </div>
       </div>
 
       {/* ✅ Export target wrapper must be relative */}

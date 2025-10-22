@@ -7,21 +7,20 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   captureById,
-  buildPdfFromImages,
   buildPdfSinglePageFromImages,
   makeDefaultTargets,
   niceNow,
 } from "@/lib/export-utils";
 import type { UnifiedPond } from "@/lib/pond-context";
-import { useAuth } from "@/lib/auth-context";          // 👈 NEW
-import { useUser } from "@/lib/user-context";          // 👈 NEW
+import { useAuth } from "@/lib/auth-context";
+import { useUser } from "@/lib/user-context";
 
-type Props = { open: boolean; onClose: () => void; pond: UnifiedPond };
+type Props = { open: boolean; onCloseAction: () => void; pond: UnifiedPond };
 
-export default function ExportModal({ open, onClose, pond }: Props) {
+export default function ExportModal({ open, onCloseAction, pond }: Props) {
   const targets = useMemo(() => makeDefaultTargets(), []);
-  const { user } = useAuth();            // 👈 email
-  const { userProfile } = useUser();     // 👈 studentId lives here
+  const { user } = useAuth();
+  const { userProfile } = useUser();
 
   const studentId =
     (userProfile as any)?.studentId ||
@@ -44,42 +43,67 @@ export default function ExportModal({ open, onClose, pond }: Props) {
   const onExport = async () => {
     setBusy(true);
     setError(null);
+
+    // 1. Define the desktop width and create the style override
+    const DESKTOP_WIDTH = 1024;
+    const styleTag = document.createElement("style");
+    styleTag.id = "temp-dashboard-print-styles";
+    // This CSS forces the main content area of your page to a fixed width.
+    // We assume your page content is inside a <main> tag, which is standard.
+    styleTag.innerHTML = `
+      main {
+        width: ${DESKTOP_WIDTH}px !important;
+        max-width: ${DESKTOP_WIDTH}px !important;
+        margin: 0 auto !important;
+      }
+    `;
+
     try {
       const chosen = targets.filter((t) => selected[t.id]);
       if (chosen.length === 0) {
-        setBusy(false);
         setError("Pick at least one section to export.");
+        setBusy(false);
         return;
       }
 
+      // 2. Apply the styles and wait for the page to re-render
+      document.head.appendChild(styleTag);
+      await new Promise(resolve => setTimeout(resolve, 200));
+
       const images: Array<{ title: string; dataUrl: string }> = [];
       for (const t of chosen) {
-        const dataUrl = await captureById(t.id);
+        // 3. Capture each element, telling the library to use the desktop width
+        const dataUrl = await captureById(t.id, { width: DESKTOP_WIDTH });
         if (dataUrl) images.push({ title: t.title, dataUrl });
       }
+
       if (images.length === 0) {
-        setBusy(false);
         setError("Nothing was captured. Are the sections visible on this page?");
+        setBusy(false);
         return;
       }
 
       const file = `${pond?.name || "Pond"}_${niceNow()}.pdf`;
       const footer = { email: user?.email ?? null, studentId };
 
-      // using single-page builder (your UI has this fixed)
       await buildPdfSinglePageFromImages({ images, fileName: file, footer });
 
-      onClose();
+      onCloseAction();
     } catch (e) {
       console.error(e);
       setError("Export failed. Check console for details.");
     } finally {
+      // 4. CRITICAL: Always remove the temporary stylesheet to restore the page
       setBusy(false);
+      const existingStyleTag = document.getElementById(styleTag.id);
+      if (existingStyleTag) {
+        document.head.removeChild(existingStyleTag);
+      }
     }
   };
 
   return (
-    <Dialog open={open} onOpenChange={(v) => (!v ? onClose() : null)}>
+    <Dialog open={open} onOpenChange={(v) => (!v ? onCloseAction() : null)}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Export data (current view)</DialogTitle>
@@ -102,7 +126,6 @@ export default function ExportModal({ open, onClose, pond }: Props) {
             })}
           </div>
 
-          {/* Fixed single-page checkbox */}
           <label className="flex items-center gap-2">
             <Checkbox checked disabled />
             <span className="text-sm">Single page (fit to A4)</span>
@@ -111,7 +134,7 @@ export default function ExportModal({ open, onClose, pond }: Props) {
           {error && <p className="text-sm text-red-600">{error}</p>}
 
           <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={onClose} disabled={busy}>
+            <Button variant="outline" onClick={onCloseAction} disabled={busy}>
               Cancel
             </Button>
             <Button onClick={onExport} disabled={busy}>

@@ -28,8 +28,7 @@ const RANGES = {
   ph:   { min: 6.5, max: 9.0 },
   temp: { min: 28,  max: 31 },
   do:   { min: 3,   max: 5 },
-  tds:  { min: 100, max: 400 },
-};
+}
 
 function classify(value: number | null | undefined, min: number, max: number): Status {
   if (value == null || !Number.isFinite(value)) return "offline"
@@ -56,8 +55,6 @@ function getStatusIcon(sensorType: string, status: Status) {
       return <Droplets className={`${iconClass} ${colorClass}`} />
     case "dissolvedOxygen":
       return <Wind className={`${iconClass} ${colorClass}`} />
-    case "tds":
-      return <Droplets className={`${iconClass} ${colorClass}`} />
     default:
       return <AlertCircle className={`${iconClass} ${colorClass}`} />
   }
@@ -108,17 +105,15 @@ export function PondGrid({ ponds }: PondGridProps) {
   const tempVal = Number.isFinite(Number(data?.temp)) ? Number(data?.temp) : null
   const phVal   = Number.isFinite(Number(data?.ph))   ? Number(data?.ph)   : null
   const doVal   = Number.isFinite(Number(data?.do))   ? Number(data?.do)   : null
-  const tdsVal  = Number.isFinite(Number(data?.tds))  ? Number(data?.tds)  : null
 
-  // Precompute metric statuses once
+  // Precompute metric statuses once (TDS removed)
   const liveStatus = useMemo(() => {
     const temperature = classify(tempVal, RANGES.temp.min, RANGES.temp.max)
     const ph          = classify(phVal,   RANGES.ph.min,   RANGES.ph.max)
     const dissolvedOxygen = classify(doVal,   RANGES.do.min,   RANGES.do.max)
-    const tds         = classify(tdsVal,  RANGES.tds.min,  RANGES.tds.max)
-    const overall     = getOverall([temperature, ph, dissolvedOxygen, tds], isOnline)
-    return { temperature, ph, dissolvedOxygen, tds, overall }
-  }, [tempVal, phVal, doVal, tdsVal, isOnline])
+    const overall     = getOverall([temperature, ph, dissolvedOxygen], isOnline)
+    return { temperature, ph, dissolvedOxygen, overall }
+  }, [tempVal, phVal, doVal, isOnline])
 
   const handleDeletePond = (pond: UnifiedPond) => {
     setPondToDelete(pond)
@@ -175,10 +170,6 @@ export function PondGrid({ ponds }: PondGridProps) {
             value: doVal == null ? "—" : `${doVal.toFixed(1)} mg/L`,
             status: liveStatus.dissolvedOxygen as Status,
           }
-          const tds = {
-            value: tdsVal == null ? "—" : `${tdsVal.toFixed(0)} ppm`,
-            status: liveStatus.tds as Status,
-          }
 
           return (
             <Card key={pond.id} className="hover:shadow-lg transition-shadow">
@@ -217,16 +208,6 @@ export function PondGrid({ ponds }: PondGridProps) {
                       {getStatusIcon("dissolvedOxygen", dissolvedOxygen.status)}
                       <span className={`text-sm px-2 py-1 rounded ${getStatusColor(dissolvedOxygen.status)}`}>
                         {dissolvedOxygen.value}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-600">TDS</span>
-                    <div className="flex items-center space-x-2">
-                      {getStatusIcon("tds", tds.status)}
-                      <span className={`text-sm px-2 py-1 rounded ${getStatusColor(tds.status)}`}>
-                        {tds.value}
                       </span>
                     </div>
                   </div>

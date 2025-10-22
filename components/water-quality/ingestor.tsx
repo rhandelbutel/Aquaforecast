@@ -1,4 +1,3 @@
-// components/water-quality/ingestor.tsx
 "use client";
 
 import { useEffect } from "react";
@@ -16,18 +15,15 @@ export function Ingestor({ pondId }: { pondId: string }) {
 
         const payload = {
           pondId,
-          temp: Number(j.temp),
-          ph: Number(j.ph),
-          tds: Number(j.tds),
-          do: Number(j.do),
+          temp: Number(j.tempC),
+          ph: Number(j.pH),
+          do: Number(j.DOmgL),
         };
 
-        // basic sanity: if any value isn't a finite number, skip (sensor glitch/offline)
-        if ([payload.temp, payload.ph, payload.tds, payload.do].some((v) => !Number.isFinite(v))) {
-          return;
-        }
+        // basic sanity: skip if any value isn't finite
+        if ([payload.temp, payload.ph, payload.do].some((v) => !Number.isFinite(v))) return;
 
-        // Post to API route that updates today's daily doc (running average + sums + counts)
+        // ✅ correct endpoint: /api/ingest  (not /api/ingest/route)
         await fetch("/api/ingest", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

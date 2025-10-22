@@ -14,7 +14,10 @@ type FooterInfo = {
   email?: string | null;
 };
 
-export async function captureById(id: string): Promise<string | null> {
+export async function captureById(
+  id: string,
+  options: { width?: number; height?: number } = {} // <-- This is the updated part
+): Promise<string | null> {
   const el = document.getElementById(id);
   if (!el) return null;
   el.scrollIntoView({ block: "nearest" });
@@ -25,6 +28,7 @@ export async function captureById(id: string): Promise<string | null> {
       cacheBust: true,
       backgroundColor: "#ffffff",
       skipFonts: false,
+      ...options, // <-- This is the updated part
     });
     return dataUrl;
   } catch (e) {
@@ -39,7 +43,7 @@ export async function buildPdfFromImages(opts: {
   images: Array<{ title: string; dataUrl: string }>;
   fileName: string;
   footer?: FooterInfo;
-  headerBrand?: string; // ← NEW (centered)
+  headerBrand?: string;
 }) {
   const pdf = new jsPDF({ orientation: "p", unit: "pt", format: "a4" });
   const pageW = pdf.internal.pageSize.getWidth();
@@ -79,7 +83,6 @@ export async function buildPdfFromImages(opts: {
     if (!isFirst) pdf.addPage();
     addHeader();
 
-    // optional title (rarely used now)
     if (title) {
       pdf.setFontSize(12);
       pdf.text(title, margin, margin + 30);
@@ -124,14 +127,14 @@ export async function buildPdfSinglePageFromImages(opts: {
   images: Array<{ title: string; dataUrl: string }>;
   fileName: string;
   footer?: FooterInfo;
-  headerBrand?: string; // ← NEW (centered)
+  headerBrand?: string;
 }) {
   const pdf = new jsPDF({ orientation: "p", unit: "pt", format: "a4" });
   const pageW = pdf.internal.pageSize.getWidth();
   const pageH = pdf.internal.pageSize.getHeight();
 
   const margin = 28;
-  const headerH = 30; // leave a bit more for brand line
+  const headerH = 30;
   const gutter = 8;
 
   const addHeader = () => {
@@ -148,7 +151,7 @@ export async function buildPdfSinglePageFromImages(opts: {
   addHeader();
 
   const maxW = pageW - margin * 2;
-  const maxH = pageH - margin * 2 - headerH - 20; // reserve for footer
+  const maxH = pageH - margin * 2 - headerH - 20;
 
   const measured = await Promise.all(
     opts.images.map(async (img) => {
@@ -168,7 +171,6 @@ export async function buildPdfSinglePageFromImages(opts: {
     const h = m.baseH * scale;
     const x = margin + (maxW - w) / 2;
 
-    // optional per-section captions (kept subtle)
     if (m.title) {
       pdf.setFontSize(10);
       pdf.setTextColor(90);
@@ -180,7 +182,6 @@ export async function buildPdfSinglePageFromImages(opts: {
     y += h + gutter;
   });
 
-  // footer
   const nowStr = new Date().toLocaleString("en-PH", {
     year: "numeric",
     month: "long",
