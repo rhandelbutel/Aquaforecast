@@ -51,7 +51,7 @@ export type PondLite = {
 };
 
 // ----------------------------- Config (Ranges) -----------------------------
-// Optimal ranges + simple alert rules (TDS removed)
+// Optimal ranges + simple alert rules 
 export const thresholds = {
   DO: {
     optimalMin: 3.0,
@@ -137,7 +137,7 @@ async function resolveTodayByKey(pondId: string, key: string) {
   } catch {}
 }
 
-// 0ms = resolve immediately once optimal (TDS removed)
+// 0ms = resolve immediately once optimal 
 const NORMAL_WINDOWS = { do: 0, ph: 0, temp: 0 };
 
 async function maybeResolveWater(pondId: string, r: LiveReading) {

@@ -9,19 +9,19 @@ import { AlertTriangle, CheckCircle, XCircle, WifiOff } from "lucide-react"
 import type { UnifiedPond } from "@/lib/pond-context"
 import { useAuth } from "@/lib/auth-context"
 
-// 🔔 snoozes
+//  snoozes
 import { subscribeSnoozes, setSnooze, setSnoozes, type SnoozeMap } from "@/lib/alert-snooze-service"
 
-// 🔒 Firestore alerts store
+//  Firestore alerts store
 import { materializeAlerts, subscribeActiveAlerts, type StoredAlert } from "@/lib/alert-store-service"
 
-// 📡 live sensor polling hook
+//  live sensor polling hook
 import { useAquaSensors } from "@/hooks/useAquaSensors"
 
-/* ==================== SENSOR ENDPOINT CONFIG ==================== */
+/* SENSOR ENDPOINT CONFIG  */
 const ESP32_BASE =
   (process.env.NEXT_PUBLIC_SENSORS_BASE as string | undefined) || "http://aquamon.local"
-/* =============================================================== */
+
 
 /* ==================== RANGES (optimal windows) ==================== */
 const RANGES = {
@@ -36,7 +36,7 @@ type AlertType = "warning" | "error"
 
 interface AlertItem {
   id: string
-  type: AlertType            // "warning" | "error"
+  type: AlertType            
   title: string
   message: string
   when: Date
@@ -45,7 +45,7 @@ interface AlertItem {
 
 interface AlertsPanelProps { pond: UnifiedPond }
 
-// ⏱️ Make dismissed sensor alerts reappear in 1 minute if still not optimal
+// Make dismissed sensor alerts reappear in 1 minute if still not optimal
 const SNOOZE_MS = 60 * 1000
 
 function classify(value: number, min: number, max: number): "optimal" | "warning" | "error" {
@@ -65,7 +65,7 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
   const uid = user?.uid
   const pondId = (pond as any)?.adminPondId || pond.id
 
-  // 👉 live sensor data (polled every second by the hook)
+  //  live sensor data (polled every second by the hook)
   const { data, error, isOnline } = useAquaSensors({
     baseUrl: ESP32_BASE,
     intervalMs: 1000,
@@ -79,7 +79,7 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
   const tempStatus = classify(tempVal, RANGES.temp.min, RANGES.temp.max)
   const doStatus   = classify(doVal,   RANGES.do.min,   RANGES.do.max)
 
-  // 🔕 snoozes
+  //  snoozes
   const [dismissedUntil, setDismissedUntil] = useState<SnoozeMap>({})
   useEffect(() => {
     if (!uid) return
@@ -87,7 +87,7 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
     return unsub
   }, [uid])
 
-  // 🔴 Firestore materialized alerts we render
+  //  Firestore materialized alerts we render
   const [remoteAlerts, setRemoteAlerts] = useState<StoredAlert[]>([])
   useEffect(() => {
     if (!pondId) return
@@ -100,7 +100,7 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
       ? value < min ? "low" : value > max ? "high" : "out of range"
       : "unknown"
 
-  // 🧮 Build sensor alerts list (auto-clears when values return to optimal / online)
+  //  Build sensor alerts list (auto-clears when values return to optimal / online)
   const baseAlerts = useMemo<AlertItem[]>(() => {
     const list: AlertItem[] = []
     const now = new Date()
@@ -159,7 +159,7 @@ export function AlertsPanel({ pond }: AlertsPanelProps) {
     return list
   }, [isOnline, error, phVal, tempVal, doVal, phStatus, tempStatus, doStatus])
 
-  // 🔴 MATERIALIZE to Firestore whenever baseAlerts change
+  //  MATERIALIZE to Firestore whenever baseAlerts change
   useEffect(() => {
     if (!pondId) return
     const toStore = baseAlerts.map(a => ({

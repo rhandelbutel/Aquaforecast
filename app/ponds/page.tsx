@@ -5,7 +5,7 @@ import { usePonds } from "@/lib/pond-context"
 import { EmptyPonds } from "@/components/ponds/empty-ponds"
 import { PondsWithData } from "@/components/ponds/ponds-with-data"
 import HarvestModal from "@/components/admin/harvest-modal"
-import StartStockingModal from "@/components/admin/start-stocking-modal" // ✅ new modal
+import StartStockingModal from "@/components/admin/start-stocking-modal" 
 import { useAuth } from "@/lib/auth-context"
 import { isAdmin } from "@/lib/user-service"
 import { GrowthService } from "@/lib/growth-service"
@@ -111,14 +111,14 @@ export default function PondsPage() {
 
       <HarvestModal open={harvestOpen} onOpenChange={setHarvestOpen} ponds={ponds} />
 
-      {/* ✅ Show Start New Stocking button if pond is empty */}
+      {/* Show Start New Stocking button if pond is empty */}
       {pond?.fishCount === 0 && (
         <div className="flex justify-center mt-6">
           <Button onClick={() => setStockingOpen(true)}>Start New Stocking</Button>
         </div>
       )}
 
-      {/* ✅ New Start Stocking Modal */}
+      {/* New Start Stocking Modal */}
       <StartStockingModal
         open={stockingOpen}
         onOpenChange={setStockingOpen}

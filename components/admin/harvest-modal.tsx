@@ -10,8 +10,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import type { UnifiedPond } from "@/lib/pond-context"
 import { applyPartialHarvest, totalHarvest } from "@/lib/pond-service"
-
-// ✅ import this
 import { resolveDashInsight } from "@/lib/dash-insights-service"
 
 type Mode = "partial" | "total"
@@ -20,7 +18,6 @@ interface HarvestModalProps {
   open: boolean
   onOpenChange: (v: boolean) => void
   ponds: UnifiedPond[]
-  /** Optional: if you later open the modal from a specific pond row, pass it here */
   pond?: UnifiedPond
   onDone?: () => void
 }
@@ -73,7 +70,7 @@ export default function HarvestModal({ open, onOpenChange, ponds, pond, onDone }
         await totalHarvest(targetId)
       }
 
-      // ✅ Automatically resolve the “Partial Harvest Recommended” insight
+      // Automatically resolve the “Partial Harvest Recommended” insight
       await resolveDashInsight(targetId, "dash_partial_harvest").catch(() => {})
 
       onOpenChange(false)

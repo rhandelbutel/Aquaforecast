@@ -11,7 +11,7 @@ import { GrowthService, type GrowthHistory } from "@/lib/growth-service"
 import { subscribeMortalityLogs, computeSurvivalRateFromLogs, type MortalityLog } from "@/lib/mortality-service"
 import { useAuth } from "@/lib/auth-context"
 
-/* >>> NEW: AI insights renderer + sensor hook + dash-only detector <<< */
+/* >>>  AI insights renderer + sensor hook + dash-only detector <<< */
 import { AIInsightsCard } from "@/components/dashboard/ai-insights"
 import { useAquaSensors } from "@/hooks/useAquaSensors"
 import { detectRealtimeFindingsDash, type LiveReading } from "@/lib/dash-insights-service"
@@ -132,17 +132,23 @@ export function HarvestPredictionDashboard({
 
   const sharedPondId = (pond as any).adminPondId || pond.id
 
-  /* >>> NEW: stream live sensor readings into dashboard insights (no UI impact) */
+  /* stream live sensor readings into dashboard insights (no UI impact) */
   const { setOnReading } = useAquaSensors()
   useEffect(() => {
     if (!sharedPondId) return
-    setOnReading((r) => {
-      const reading: LiveReading = { ts: r.ts, temp: r.temp, ph: r.ph, tds: r.tds, do: r.do }
-      void detectRealtimeFindingsDash({ id: sharedPondId, name: pond.name }, reading)
-    })
+  setOnReading((r) => {
+  const reading: LiveReading = {
+    ts: r.ts,
+    temp: r.temp ?? 0,
+    ph: r.ph ?? 0,
+    do: r.do ?? 0,
+  };
+  void detectRealtimeFindingsDash({ id: sharedPondId, name: pond.name }, reading);
+});
+
     return () => setOnReading(undefined)
   }, [setOnReading, sharedPondId, pond.name])
-  /* <<< NEW end */
+ 
 
   useEffect(() => {
     if (!user || !sharedPondId) return
@@ -367,9 +373,9 @@ export function HarvestPredictionDashboard({
         </CardContent>
       </Card>
 
-      {/* >>> NEW: live AI insights card (replaces the old placeholder block) */}
+      {/*live AI insights card */}
       <AIInsightsCard pondId={sharedPondId} />
-      {/* <<< NEW end */}
+      {/* end */}
     </div>
 </div>
   )

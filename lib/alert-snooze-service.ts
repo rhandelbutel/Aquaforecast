@@ -7,7 +7,7 @@ import {
 } from "firebase/firestore"
 import { db } from "@/lib/firebase"
 
-export type SnoozeMap = Record<string, number> // alertKey -> epoch ms
+export type SnoozeMap = Record<string, number>
 
 const COLLECTION = "users"
 const PREFS_DOC = "alertPrefs"

@@ -19,7 +19,7 @@ export function FeedCalculator() {
     const rate = parseFloat(feedingRate)
     
     if (weight && count && rate) {
-      const totalBiomass = (weight * count) / 1000 // Convert to kg
+      const totalBiomass = (weight * count) / 1000 
       const dailyFeed = totalBiomass * (rate / 100)
       setResult(dailyFeed)
     }

@@ -82,7 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signUp = async (email: string, password: string, studentId: string) => {
     const sid = studentId.trim();
 
-    // 1️⃣ Reserve Student ID to ensure uniqueness
+    // 1 Reserve Student ID to ensure uniqueness
     const sidRef = doc(db, "studentIds", sid);
     try {
       await runTransaction(db, async (tx) => {
@@ -98,7 +98,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw e;
     }
 
-    // 2️⃣ Create Firebase Auth user
+    // 2 Create Firebase Auth user
     let fbUser: User | null = null;
     try {
       const cred = await createUserWithEmailAndPassword(auth, email, password);
@@ -108,7 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw e;
     }
 
-    // 3️⃣ Create Firestore profile + send pending email
+    // 3️ Create Firestore profile + send pending email
     try {
       if (!fbUser) throw new Error("User not created");
       const profileRef = doc(db, "users", fbUser.uid);
@@ -133,7 +133,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         { merge: true }
       );
 
-      // 4️⃣ Send "pending" email via API route
+      // 4️ Send "pending" email via API route
       try {
         await fetch(
           `${

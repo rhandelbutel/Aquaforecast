@@ -9,7 +9,7 @@ import {
   checkUserProfileExists,
   isAdmin,
   getPondPreferences,
-  subscribeUserProfile,   // ✅ realtime
+  subscribeUserProfile,   // realtime
   type UserProfile,
   type PondPreferences,
 } from "./user-service"
@@ -42,7 +42,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // 🔴 Realtime: ensure doc exists, then subscribe to it
+  //  Realtime: ensure doc exists, then subscribe to it
   useEffect(() => {
     setError(null)
 

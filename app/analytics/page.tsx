@@ -6,7 +6,7 @@ import { EmptyState } from "@/components/shared/empty-state"
 import { AnalyticsWithPonds } from "@/components/analytics/analytics-with-ponds"
 
 export default function AnalyticsPage() {
-  const { ponds, loading } = usePonds() // ponds is UnifiedPond[]
+  const { ponds, loading } = usePonds() 
 
   if (loading) {
     return (
@@ -30,6 +30,6 @@ export default function AnalyticsPage() {
     )
   }
 
-  // ✅ ponds is UnifiedPond[], and AnalyticsWithPonds is typed to UnifiedPond[]
+  // ponds is UnifiedPond[], and AnalyticsWithPonds is typed to UnifiedPond[]
   return <AnalyticsWithPonds ponds={ponds} />
 }

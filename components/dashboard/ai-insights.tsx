@@ -9,7 +9,6 @@ import {
   subscribeDashInsights,
   resolveDashInsight,
   type DashInsight,
-  // NOTE: don't import LiveReading to avoid forcing a 'tds' field
   type PondLite,
   detectRealtimeFindingsDash,
   resolveAllWaterInsightsForOffline,
@@ -29,10 +28,10 @@ const badgeFor = (sev: DashInsight["severity"]) =>
 const ESP32_BASE =
   (process.env.NEXT_PUBLIC_SENSORS_BASE as string | undefined) || "http://aquamon.local";
 
-// TDS removed
+
 const DIFF = { temp: 0.5, ph: 0.2, do: 0.2 };
 
-// Change this to 10000 if you want 10s
+
 const OFFLINE_CLEAR_DELAY_MS = 5_000;
 
 export function AIInsightsCard({ pondId, pondName }: { pondId: string; pondName?: string }) {
@@ -104,7 +103,7 @@ export function AIInsightsCard({ pondId, pondName }: { pondId: string; pondName?
       }, OFFLINE_CLEAR_DELAY_MS);
     }
 
-    // If we come back online, cancel any pending clear.
+    
     if (isOnline === true && offlineTimerRef.current) {
       clearTimeout(offlineTimerRef.current);
       offlineTimerRef.current = null;
@@ -118,7 +117,7 @@ export function AIInsightsCard({ pondId, pondName }: { pondId: string; pondName?
       }
     };
   }, [isOnline, pondId]);
-  // -----------------------------------------------
+
 
   const display = useMemo(() => {
     const rank = (s: DashInsight["severity"]) =>

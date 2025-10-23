@@ -20,9 +20,9 @@ import { pushFeedingVarianceInsight } from "@/lib/dash-insights-service"
 
 /* ---- Time helpers (Asia/Manila) ---- */
 const TZ = "Asia/Manila"
-const fmtDatePH = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(d) // YYYY-MM-DD
+const fmtDatePH = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: TZ }).format(d)
 const fmtTimePH = (d: Date) =>
-  new Intl.DateTimeFormat("en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit", hour12: false }).format(d) // HH:mm
+  new Intl.DateTimeFormat("en-GB", { timeZone: TZ, hour: "2-digit", minute: "2-digit", hour12: false }).format(d)
 const toUTCFromPH = (dateStr: string, timeStr: string) => {
   const [y, m, d] = dateStr.split("-").map(Number)
   const [hh, mm] = timeStr.split(":").map(Number)
@@ -45,29 +45,23 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
   const selectedPond = ponds[0]
   const sharedPondId = (selectedPond as any)?.adminPondId || selectedPond?.id
 
-  // ui
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [success, setSuccess] = useState("")
 
-  // dialogs
-  const [missedOpen, setMissedOpen] = useState(false)
   const [confirmEarlyOpen, setConfirmEarlyOpen] = useState(false)
   const [confirmAmountOpen, setConfirmAmountOpen] = useState(false)
-  const [tooEarlyOpen, setTooEarlyOpen] = useState(false) // 👈 NEW: restriction popup
+  const [tooEarlyOpen, setTooEarlyOpen] = useState(false)
   const [pendingEarly, setPendingEarly] = useState<{ fedAt: Date; grams: number } | null>(null)
   const [pendingAmount, setPendingAmount] = useState<{ fedAt: Date; grams: number } | null>(null)
 
-  // form
   const { date: currentDate, time: currentTime } = nowStringsPH()
   const [formData, setFormData] = useState({ date: currentDate, time: currentTime, feedGiven: "" })
 
-  // schedule + logs (live)
   const [schedule, setSchedule] = useState<FeedingSchedule | null>(null)
   const [logs, setLogs] = useState<FeedingLog[]>([])
   const unsubRef = useRef<null | (() => void)>(null)
 
-  // suggestions
   const [abw, setAbw] = useState<number | null>(null)
   const [estimatedAlive, setEstimatedAlive] = useState<number | null>(null)
   const feedingFrequency = selectedPond?.feedingFrequency ?? 0
@@ -98,16 +92,12 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
   useEffect(() => {
     if (!isOpen || !sharedPondId) return
     let cancelled = false
-
     ;(async () => {
       const s = await feedingScheduleService.getByPondId(sharedPondId)
       if (!cancelled) setSchedule(s)
     })()
-
-    // live logs
     unsubRef.current?.()
     unsubRef.current = subscribeFeedingLogs(sharedPondId, (arr) => setLogs(arr))
-
     return () => {
       cancelled = true
       unsubRef.current?.()
@@ -115,7 +105,7 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
     }
   }, [isOpen, sharedPondId])
 
-  /* suggestions sources */
+  /* suggestions */
   useEffect(() => {
     if (!isOpen || !user || !sharedPondId || !selectedPond) return
     ;(async () => {
@@ -132,7 +122,7 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
     })()
   }, [isOpen, user, sharedPondId, selectedPond])
 
-  /* build today's slots */
+  /* schedule helpers */
   const makePHDate = (base: Date, hhmm: string) => {
     const [hh, mm] = hhmm.split(":").map(Number)
     return toUTCFromPH(fmtDatePH(base), `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`)
@@ -143,32 +133,11 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
     return schedule.feedingTimes.map((t) => makePHDate(today, t)).sort((a, b) => a.getTime() - b.getTime())
   }, [schedule])
 
-  const isLoggedNear = (slot: Date, nearMs = 90 * 60 * 1000) =>
-    logs.some((l) => Math.abs(new Date(l.fedAt).getTime() - slot.getTime()) <= nearMs)
-
-  const missedSlots = useMemo(() => {
-    if (!schedule) return []
-    const now = new Date()
-    return todaySlotsUTC.filter((s) => s.getTime() < now.getTime() && !isLoggedNear(s))
-  }, [todaySlotsUTC, schedule, logs])
-
   const nextSlot = useMemo<Date | null>(() => {
     const now = new Date()
     return todaySlotsUTC.find((s) => s.getTime() >= now.getTime()) ?? null
   }, [todaySlotsUTC])
 
-  /* OPEN MISSED POPUP when data becomes ready */
-  const dataReady = !!schedule && isOpen
-  const shownMissedOnce = useRef(false)
-  useEffect(() => {
-    if (!dataReady) return
-    if (missedSlots.length > 0 && !shownMissedOnce.current) {
-      setMissedOpen(true)
-      shownMissedOnce.current = true
-    }
-  }, [dataReady, missedSlots.length])
-
-  /* form handlers */
   const handleInputChange = (field: "date" | "time" | "feedGiven", value: string) => {
     if (field === "date") {
       const isToday = value === currentDate
@@ -184,9 +153,9 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
     }
     setFormData((p) => ({ ...p, [field]: value }))
   }
+
   const applySuggestion = () => perFeedingGrams != null && setFormData((p) => ({ ...p, feedGiven: String(perFeedingGrams) }))
 
-  /* guards + submit */
   const countTodayLogs = () => {
     const todayStr = fmtDatePH(new Date())
     return logs.filter((l) => fmtDatePH(new Date(l.fedAt)) === todayStr).length
@@ -212,16 +181,7 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
         reason: "manual",
       })
 
-      // ⬇️ keep your insight hook
-      try {
-        await pushFeedingVarianceInsight(
-          sharedPondId,
-          selectedPond.name,
-          grams,
-          perFeedingGrams ?? null
-        )
-      } catch {}
-
+      await pushFeedingVarianceInsight(sharedPondId, selectedPond.name, grams, perFeedingGrams ?? null).catch(() => {})
       setSuccess("Feeding logged successfully!")
       setTimeout(() => {
         onSuccess?.()
@@ -239,26 +199,20 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
   }
 
   const startSubmitWithGuards = (fedAt: Date, grams: number) => {
-    // cap by pond frequency (PH local day)
     if (feedingFrequency > 0 && countTodayLogs() >= feedingFrequency) {
       setError(`Daily limit reached (${feedingFrequency}×/day).`)
       return
     }
 
-    // early logic against the NEXT schedule time
     const now = new Date()
     const early = !!nextSlot && now < nextSlot && fedAt.getTime() <= now.getTime()
 
     if (early && nextSlot) {
       const minutesUntilNext = Math.ceil((nextSlot.getTime() - now.getTime()) / 60000)
-
-      // 👇 NEW: if > 60 minutes early -> restriction popup
       if (minutesUntilNext > 60) {
         setTooEarlyOpen(true)
         return
       }
-
-      // 👇 existing behavior: 0–60 minutes early -> confirmation
       if (minutesUntilNext > 0) {
         setPendingEarly({ fedAt, grams })
         setConfirmEarlyOpen(true)
@@ -381,7 +335,6 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
                 </div>
               </div>
 
-              {/* Alerts */}
               {error && (
                 <Alert variant="destructive" className="mt-2">
                   <AlertDescription>{error}</AlertDescription>
@@ -393,7 +346,6 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
                 </Alert>
               )}
 
-              {/* Actions */}
               <div className="flex gap-3 pt-2">
                 <Button type="button" variant="outline" className="flex-1 bg-transparent" onClick={onClose} disabled={loading}>Cancel</Button>
                 <Button type="submit" className="flex-1 bg-cyan-600 hover:bg-cyan-700" disabled={loading}>
@@ -405,26 +357,7 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
         </Card>
       </div>
 
-      {/* Missed logs chooser */}
-      <Dialog open={missedOpen} onOpenChange={setMissedOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Missed scheduled feedings today</DialogTitle></DialogHeader>
-          {missedSlots.length === 0 ? (
-            <div className="text-sm text-gray-600">No missed schedules for today.</div>
-          ) : (
-            <MissedChooser
-              slots={missedSlots}
-              onPick={(slot) => {
-                setFormData((p) => ({ ...p, date: fmtDatePH(slot), time: fmtTimePH(slot) }))
-                setMissedOpen(false)
-              }}
-            />
-          )}
-          <DialogFooter><Button variant="outline" onClick={() => setMissedOpen(false)}>Close</Button></DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Too-early restriction ( > 60 min ) */}
+      {/* Too-early restriction */}
       <Dialog open={tooEarlyOpen} onOpenChange={setTooEarlyOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Too early to log</DialogTitle></DialogHeader>
@@ -466,7 +399,7 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
         </DialogContent>
       </Dialog>
 
-      {/* Amount confirmation (unchanged) */}
+      {/* Amount confirmation */}
       <Dialog open={confirmAmountOpen} onOpenChange={setConfirmAmountOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Confirm feeding amount</DialogTitle></DialogHeader>
@@ -482,33 +415,5 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
         </DialogContent>
       </Dialog>
     </>
-  )
-}
-
-/* Missed chooser */
-function MissedChooser({ slots, onPick }: { slots: Date[]; onPick: (slot: Date) => void }) {
-  const [selected, setSelected] = useState<Date | null>(slots[0] ?? null)
-  useEffect(() => { if (!selected && slots.length) setSelected(slots[0]) }, [slots, selected])
-  return (
-    <div className="space-y-3">
-      <div className="text-sm text-gray-600">Select a missed time to log:</div>
-      <div className="max-h-60 overflow-y-auto border rounded-md">
-        {slots.map((s) => {
-          const key = s.getTime()
-          return (
-            <label key={key} className="flex items-center gap-3 px-3 py-2 border-b last:border-b-0 cursor-pointer">
-              <input type="radio" name="missed" className="accent-cyan-600" checked={selected?.getTime() === key} onChange={() => setSelected(s)} />
-              <div className="text-sm">
-                <div className="font-medium">{fmtTimePH(s)}</div>
-                <div className="text-gray-500">{fmtDatePH(s)}</div>
-              </div>
-            </label>
-          )
-        })}
-      </div>
-      <div className="flex justify-end">
-        <Button onClick={() => selected && onPick(selected)}>Use this time</Button>
-      </div>
-    </div>
   )
 }

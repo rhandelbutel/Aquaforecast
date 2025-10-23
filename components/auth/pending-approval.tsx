@@ -17,7 +17,7 @@ import {
   Mail,
   Calendar,
   ShieldBan,
-  IdCard, // 👈 NEW: lucide-react id card icon
+  IdCard, 
 } from "lucide-react"
 
 type ApprovalState = "pending" | "approved" | "rejected" | "blocked"
@@ -58,7 +58,7 @@ export function PendingApproval() {
         setStatusMessage(
           "Your account has been blocked by an administrator. Please sign out and contact support if you believe this is a mistake."
         )
-        setCountdown(0) // no auto-logout here
+        setCountdown(0) 
         break
       case "pending":
       default:
@@ -179,7 +179,7 @@ export function PendingApproval() {
                 <span>{userProfile.email}</span>
               </div>
 
-              {/* 👇 NEW: Student ID row (shown for all states) */}
+              {/*  Student ID row (shown for all states) */}
               <div className="flex items-center gap-2 text-sm text-gray-700">
                 <IdCard className="h-4 w-4" />
                 <span>
