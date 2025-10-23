@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/lib/auth-context"
@@ -35,12 +34,10 @@ export function SignInForm({ onSignUpClick, onResetClick }: SignInFormProps) {
       console.log("Attempting to sign in with:", email)
       await signIn(email, password)
 
-      // Check if user is admin after successful sign in
       if (isAdmin(email)) {
         console.log("Admin user detected, redirecting to admin panel")
         router.push("/admin")
       }
-      // Regular users will be handled by the AuthWrapper/ApprovalChecker
     } catch (error: any) {
       console.error("Sign in error:", error)
       if (error.code === "auth/user-not-found") {
@@ -78,7 +75,8 @@ export function SignInForm({ onSignUpClick, onResetClick }: SignInFormProps) {
           type="email"
           placeholder="Enter your email"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e) => setEmail(e.target.value.slice(0, 30))}
+          maxLength={30}
           required
         />
       </div>
@@ -91,7 +89,8 @@ export function SignInForm({ onSignUpClick, onResetClick }: SignInFormProps) {
             type={showPassword ? "text" : "password"}
             placeholder="Enter your password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => setPassword(e.target.value.slice(0, 25))}
+            maxLength={25}
             required
           />
           <button
