@@ -11,7 +11,7 @@ import { FeedingScheduleModal } from "@/components/feeding/feeding-schedule-moda
 import { FeedingLogModal } from "@/components/feeding/feeding-log-modal"
 import { MortalityLogModal } from "@/components/mortality/mortality-log-modal"
 import { GrowthSetupModal } from "@/components/growth/growth-setup-modal"
-import ExportModal from "@/components/export/export-modal" // 👈 NEW
+import ExportModal from "@/components/export/export-modal" 
 
 import type { UnifiedPond } from "@/lib/pond-context"
 import { feedingScheduleService, type FeedingSchedule } from "@/lib/feeding-schedule-service"

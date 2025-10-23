@@ -19,7 +19,7 @@ import {
 } from "@/lib/mortality-service"
 import { useAquaSensors } from "@/hooks/useAquaSensors"
 
-// ---- Ideal ranges text (TDS removed) ----
+// ---- Ideal ranges text  ----
 const IDEAL = { temp: "29–31 °C", ph: "6.5–9.5", do: "3–5 mg/L" }
 
 // ---------- Status helpers ----------

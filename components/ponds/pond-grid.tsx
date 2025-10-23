@@ -22,7 +22,7 @@ const ESP32_BASE =
   (process.env.NEXT_PUBLIC_SENSORS_BASE as string | undefined) || "http://aquamon.local"
 // ===============================================================
 
-// Tilapia-friendly defaults (tweak to your SOP)
+
 type Status = "optimal" | "warning" | "danger" | "offline"
 const RANGES = {
   ph:   { min: 6.5, max: 9.0 },
@@ -94,7 +94,7 @@ export function PondGrid({ ponds }: PondGridProps) {
 
   const userIsAdmin = isAdmin(user?.email || "")
 
-  // 🔴 One poll for the whole grid (shared across cards)
+  // One poll for the whole grid (shared across cards)
   // If you truly have one device per pond, we can move this inside the map with sensorId-specific baseUrls.
   const { data, isOnline } = useAquaSensors({
     baseUrl: ESP32_BASE,
@@ -106,7 +106,7 @@ export function PondGrid({ ponds }: PondGridProps) {
   const phVal   = Number.isFinite(Number(data?.ph))   ? Number(data?.ph)   : null
   const doVal   = Number.isFinite(Number(data?.do))   ? Number(data?.do)   : null
 
-  // Precompute metric statuses once (TDS removed)
+  // Precompute metric statuses once
   const liveStatus = useMemo(() => {
     const temperature = classify(tempVal, RANGES.temp.min, RANGES.temp.max)
     const ph          = classify(phVal,   RANGES.ph.min,   RANGES.ph.max)

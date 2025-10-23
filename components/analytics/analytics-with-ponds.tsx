@@ -25,7 +25,7 @@ export function AnalyticsWithPonds({ ponds }: AnalyticsWithPondsProps) {
         </div>
       </div>
 
-      {/* ✅ Export target wrapper must be relative */}
+      {/* Export target wrapper must be relative */}
       <div id="export-analytics-section" className="relative space-y-6 bg-white p-4 rounded-lg">
         {ponds.map((pond) => (
           <div key={pond.id} className="space-y-6">
@@ -33,12 +33,12 @@ export function AnalyticsWithPonds({ ponds }: AnalyticsWithPondsProps) {
             <FeedingHistory pond={pond as any} />
             <GrowthCharts pond={pond as any} />
 
-            {/* 👇 Still visible on screen, but hidden only in PDF export */}
+            {/* Still visible on screen, but hidden only in PDF export */}
             <div data-export-hide>
               <EfficiencyTips pond={pond as any} />
             </div>
 
-            {/* 👇 Hidden component that renders the export-only summary table per pond */}
+            {/* Hidden component that renders the export-only summary table per pond */}
             <AnalyticsSummaryExport pond={pond as any} />
           </div>
         ))}

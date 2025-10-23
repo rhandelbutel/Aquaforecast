@@ -59,7 +59,7 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
         const latest = l[0] ?? null
         setLastLogDate(latest?.date ?? null)
 
-        setDateStr(toYMD(new Date())) // always today; no editing
+        setDateStr(toYMD(new Date())) 
         setRateStr("")
         setError("")
         setSuccess("")

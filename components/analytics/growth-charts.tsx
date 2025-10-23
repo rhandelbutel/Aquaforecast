@@ -73,7 +73,7 @@ function buildPredictedSeriesDynamic(
   seedForP1: number,
   target: number | null | undefined,
   extraAheadIfNoTarget = 8,
-  safetyCap = 200 // just in case target is very large
+  safetyCap = 200
 ): number[] {
   const baseLen = Math.max(1, actual.length)
 

@@ -22,10 +22,10 @@ export interface FeedingLog {
   fedAt: Date;
   feedGiven?: number;
   feedUnit?: "g" | "kg";
-  // NEW — identify auto-logs
+ 
   autoLogged?: boolean;
   reason?: "missed_schedule" | "manual" | "other";
-  scheduledFor?: Date;          // 🔑 used for slot counting within the day
+  scheduledFor?: Date;          // used for slot counting within the day
   createdAt: Date;
 }
 

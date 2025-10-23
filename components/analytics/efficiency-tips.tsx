@@ -52,12 +52,12 @@ export function EfficiencyTips({ pond }: Props) {
       // Always record a heartbeat
       await recordHeartbeat(pond.id);
 
-      // ✅ Guard: only run realtime detection when all values are numbers
+      // Guard: only run realtime detection when all values are numbers
       if (r.temp == null || r.ph == null || r.do == null) return;
 
       await detectRealtimeFindings(
         { id: pond.id, name: pond.name, fishSpecies: pond.fishSpecies },
-        { ts: r.ts, temp: r.temp, ph: r.ph, do: r.do } // TDS removed
+        { ts: r.ts, temp: r.temp, ph: r.ph, do: r.do } 
       );
     });
 
@@ -88,7 +88,7 @@ export function EfficiencyTips({ pond }: Props) {
     };
   }, [pond?.id, pond?.name]);
 
-  // 4) Sort & trim (danger > error > warning > info; newest first)
+  // Sort & trim (danger > error > warning > info; newest first)
   const display = useMemo(() => {
     const rank = (s: Insight["severity"]) => (s === "danger" ? 3 : s === "error" ? 2 : s === "warning" ? 1 : 0);
 

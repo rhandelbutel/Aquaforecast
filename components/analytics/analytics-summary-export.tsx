@@ -93,7 +93,7 @@ export function AnalyticsSummaryExport({ pond }: Props) {
     if (!sharedPondId) return
 
     const u1 = GrowthService.subscribeGrowthHistory(sharedPondId, (items) => {
-      setHistory([...items].reverse()) // chronological
+      setHistory([...items].reverse()) 
     })
     const u2 = GrowthService.subscribeGrowthSetup(sharedPondId, (s) => {
       setCurrentABW(s?.currentABW ?? null)
@@ -134,7 +134,7 @@ export function AnalyticsSummaryExport({ pond }: Props) {
     })
 
     const dates: string[] = ["Start"]
-    const values: number[] = [100] // Start = 100%
+    const values: number[] = [100] 
 
     let cumulativeMortality = 0
     for (const log of chrono) {

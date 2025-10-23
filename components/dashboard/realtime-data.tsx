@@ -12,7 +12,7 @@ const ESP32_BASE =
   (process.env.NEXT_PUBLIC_SENSORS_BASE as string | undefined) || "http://aquamon.local";
 // ===============================================================
 
-// Ranges you’ve been using in your app (tweak as needed) — TDS removed
+// Ranges you’ve been using in your app (tweak as needed)
 const RANGES = {
   ph:   { min: 6.5, max: 9.0, label: "6.5–9.0" },
   temp: { min: 28,  max: 31,  label: "22–28°C" },
@@ -72,7 +72,6 @@ export function RealtimeData({ pond }: RealtimeDataProps) {
   const phStatus   = Number.isFinite(phVal)   ? classify(phVal,   RANGES.ph.min,   RANGES.ph.max)   : "danger";
   const doStatus   = Number.isFinite(doVal)   ? classify(doVal,   RANGES.do.min,   RANGES.do.max)   : "danger";
 
-  // If you had UI below (cards/badges), use tempVal/phVal/doVal + their statuses.
   // This stub returns null so removing TDS won’t break the build if you’re refactoring UI separately.
   return null;
 }

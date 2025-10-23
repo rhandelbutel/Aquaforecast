@@ -18,9 +18,9 @@ export interface FeedingSchedule {
   pondId: string           // shared key: (adminPondId || pond.id)
   pondName: string
   timesPerDay: number
-  feedingTimes: string[]   // ["07:00","19:00"] 24h (local)
+  feedingTimes: string[]   
   repeatType: RepeatType
-  selectedDays?: number[]  // 0..6 if weekly
+  selectedDays?: number[]  
   startDate: Date
   endDate?: Date
   isActive: boolean
@@ -42,7 +42,7 @@ export interface CreateFeedingScheduleData {
   pondId: string
   pondName: string
   timesPerDay: number
-  feedingTimes: string[]     // length === timesPerDay
+  feedingTimes: string[]     
   repeatType: RepeatType
   selectedDays?: number[]
   startDate: Date

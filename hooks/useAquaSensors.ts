@@ -5,10 +5,10 @@ import { useEffect, useRef, useState, useCallback } from "react";
 
 export type SensorJson = {
   device: string;
-  ts: number;        // ms epoch (or "now" if firmware gives uptime)
-  temp: number | null;      // °C
+  ts: number;      
+  temp: number | null;     
   ph: number | null;
-  do: number | null;        // mg/L
+  do: number | null;        
   connected?: boolean;
   v?: { ph?: number; do?: number };
 };
@@ -73,7 +73,7 @@ export function useAquaSensors(opts: Options = {}) {
   const timerRef = useRef<number | null>(null);
   const backoffRef = useRef<number>(intervalMs);
 
-  // optional external listener without re-renders
+  
   const onReadingRef = useRef<((r: SensorJson) => void) | undefined>(undefined);
   const setOnReading = useCallback((cb?: (r: SensorJson) => void) => {
     onReadingRef.current = cb;

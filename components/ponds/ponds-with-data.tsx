@@ -12,7 +12,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 
 interface PondsWithDataProps {
   ponds: UnifiedPond[]
-  onClickHarvest?: () => void   // <-- NEW: open Harvest modal from header
+  onClickHarvest?: () => void   // open Harvest modal from header
 }
 
 export function PondsWithData({ ponds, onClickHarvest }: PondsWithDataProps) {

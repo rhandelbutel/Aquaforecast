@@ -13,7 +13,7 @@ import {
   onSnapshot,
 } from "firebase/firestore";
 import { db } from "./firebase";
-import { sendUserStatusEmail } from "./email-service"; // ✅ added
+import { sendUserStatusEmail } from "./email-service"; //  added
 
 // ---------- Types ----------
 export interface UserProfile {
