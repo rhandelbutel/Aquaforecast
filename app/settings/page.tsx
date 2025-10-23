@@ -2,8 +2,6 @@
 
 import { useSearchParams } from "next/navigation"
 import { UserProfile } from "@/components/settings/user-profile"
-// import { PondPreferences } from "@/components/settings/pond-preferences"
-import { NotificationSettings } from "@/components/settings/notification-settings"
 
 export default function SettingsPage() {
   const searchParams = useSearchParams()
@@ -25,7 +23,6 @@ export default function SettingsPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <UserProfile />
-        <NotificationSettings />
         <div className="lg:col-span-2">
           {/* <PondPreferences /> */}
         </div>

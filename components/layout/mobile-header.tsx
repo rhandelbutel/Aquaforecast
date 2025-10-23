@@ -1,12 +1,13 @@
 "use client"
 
-import { useEffect, useMemo, useState } from 'react'
-import { Fish, Menu, Bell } from 'lucide-react'
-import { NotificationPanel } from '../notifications/notification-panel'
-import { usePonds } from '@/lib/pond-context'
-import { useAuth } from '@/lib/auth-context'
-import { subscribeSnoozes, type SnoozeMap } from '@/lib/alert-snooze-service'
-import { subscribeActiveAlerts, type StoredAlert } from '@/lib/alert-store-service'
+import { useEffect, useMemo, useState } from "react"
+import Image from "next/image"
+import { Menu, Bell } from "lucide-react"
+import { NotificationPanel } from "../notifications/notification-panel"
+import { usePonds } from "@/lib/pond-context"
+import { useAuth } from "@/lib/auth-context"
+import { subscribeSnoozes, type SnoozeMap } from "@/lib/alert-snooze-service"
+import { subscribeActiveAlerts, type StoredAlert } from "@/lib/alert-store-service"
 
 interface MobileHeaderProps {
   onMenuClick: () => void
@@ -45,7 +46,6 @@ export function MobileHeader({ onMenuClick }: MobileHeaderProps) {
   // Badge count = active alerts not snoozed (exclude purely "success"/normal items)
   const notificationCount = useMemo(() => {
     const now = Date.now()
-    // flatten and de-duplicate by id across ponds
     const dedup: Record<string, StoredAlert> = {}
     for (const list of Object.values(pondAlertsMap)) {
       for (const a of (list || [])) dedup[a.id] = a
@@ -65,16 +65,29 @@ export function MobileHeader({ onMenuClick }: MobileHeaderProps) {
       <header className="fixed top-0 left-0 right-0 z-50 bg-white shadow-sm border-b">
         <div className="flex items-center justify-between px-4 h-16">
           <div className="flex items-center">
-            <button 
+            <button
               onClick={onMenuClick}
               className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg mr-2"
             >
               <Menu className="h-5 w-5" />
             </button>
-            <Fish className="h-6 w-6 text-cyan-600" />
+
+            {/* Logo replaces Fish icon — compact size */}
+            <div className="relative h-6 w-6 md:h-7 md:w-7">
+              <Image
+                src="/Aquaforecast_logo1.png"
+                alt="AquaForecast logo"
+                fill
+                sizes="(min-width: 768px) 28px, 24px"
+                className="object-contain"
+                priority
+              />
+            </div>
+
             <span className="ml-2 text-lg font-bold text-gray-900">AQUAFORECAST</span>
           </div>
-          <button 
+
+          <button
             onClick={() => setShowNotifications(!showNotifications)}
             className="p-2 text-gray-600 hover:text-gray-900 relative"
           >

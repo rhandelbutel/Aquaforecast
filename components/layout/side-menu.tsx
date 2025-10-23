@@ -1,12 +1,24 @@
 "use client"
 
 import { useState } from "react"
+import Image from "next/image"
 import { useRouter, usePathname } from "next/navigation"
 import { useAuth } from "@/lib/auth-context"
 import { isAdmin } from "@/lib/user-service"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Home, Droplets, BarChart3, Calculator, Settings, LogOut, X, Fish, Users, Loader2 } from "lucide-react"
+import {
+  Home,
+  Droplets,
+  BarChart3,
+  Calculator,
+  Settings,
+  LogOut,
+  X,
+  Fish,          
+  Users,
+  Loader2,
+} from "lucide-react"
 
 interface SideMenuProps {
   onClose: () => void
@@ -28,13 +40,11 @@ export function SideMenu({ onClose }: SideMenuProps) {
 
   // Call this ONLY after showing the spinner for a short moment.
   const onConfirmSignOut = async () => {
-    setSigningOut(true)                // immediately show loader overlay
+    setSigningOut(true) // immediately show loader overlay
     try {
-      // Let the user actually see the loading state before auth flips and redirects.
-      await sleep(900)                 // adjust to preference (600–1200ms feels good)
-      await logout()                   // this will trigger your route guard/middleware redirect
+      await sleep(900)  
+      await logout()    // triggers your redirect/guard
       if (pathname.startsWith("/admin")) {
-        // Fallback redirect if you don't have middleware
         router.push("/")
       }
     } catch (error) {
@@ -42,14 +52,14 @@ export function SideMenu({ onClose }: SideMenuProps) {
       setSigningOut(false)
     } finally {
       setShowLogoutModal(false)
-      // Don't set signingOut=false here—logout will cause redirect anyway.
+      
     }
   }
 
   // Create base menu items
   const baseMenuItems = [
     { icon: Home, label: "Dashboard", path: "/" },
-    { icon: Fish, label: "Ponds", path: "/ponds" },
+    { icon: Fish, label: "Ponds", path: "/ponds" }, 
     { icon: Droplets, label: "Water Quality", path: "/water-quality" },
     { icon: BarChart3, label: "Analytics", path: "/analytics" },
     { icon: Calculator, label: "Calculations", path: "/calculations" },
@@ -68,7 +78,17 @@ export function SideMenu({ onClose }: SideMenuProps) {
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b">
           <div className="flex items-center">
-            <Fish className="h-6 w-6 text-cyan-600" />
+            {/* Logo replaces header Fish icon */}
+            <span className="relative h-6 w-6 md:h-7 md:w-7">
+              <Image
+                src="/Aquaforecast_logo.png"
+                alt="AquaForecast logo"
+                fill
+                sizes="(min-width: 768px) 28px, 24px"
+                className="object-contain"
+                priority
+              />
+            </span>
             <span className="ml-2 text-lg font-bold text-gray-900">AQUAFORECAST</span>
           </div>
           <button
