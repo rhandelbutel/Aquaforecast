@@ -31,6 +31,10 @@ export function UserProfile() {
   const originalFullName = userProfile?.fullName ?? ""
   const originalPhone = userProfile?.phone ?? ""
 
+  // === Role-aware UI flags ===
+  const isAdminRole = userProfile?.role === "admin"
+  const showPhone = !isAdminRole // hide phone for admins
+
   // === Helpers ===
   const sanitizePhone = (v: string) => v.replace(/[^\d+]/g, "").slice(0, 13)
   const isPhoneEmpty = phone.length === 0
@@ -42,7 +46,6 @@ export function UserProfile() {
   useEffect(() => {
     if (!userProfile) return
     let stored = userProfile.phone ?? ""
-    // always show in +63 format if saved that way
     if (stored.startsWith("09")) {
       stored = "+63" + stored.slice(1)
     }
@@ -58,8 +61,11 @@ export function UserProfile() {
   }, [isEditingPhone])
 
   const hasChanges = useMemo(() => {
-    return fullName.trim() !== originalFullName.trim() || phone !== originalPhone
-  }, [fullName, phone, originalFullName, originalPhone])
+    // For admins, ignore phone when checking for changes
+    const nameChanged = fullName.trim() !== originalFullName.trim()
+    if (!showPhone) return nameChanged
+    return nameChanged || phone !== originalPhone
+  }, [fullName, phone, originalFullName, originalPhone, showPhone])
 
   const onPhoneChange: React.ChangeEventHandler<HTMLInputElement> = (e) => {
     setPhone(sanitizePhone(e.target.value))
@@ -69,7 +75,8 @@ export function UserProfile() {
     e.preventDefault()
     if (!user || !hasChanges) return
 
-    if (!isPhoneValid) {
+    // Only validate phone if it's shown (i.e., non-admin)
+    if (showPhone && !isPhoneValid) {
       setError("Invalid phone format. Use 09XXXXXXXXX or +639XXXXXXXXX.")
       return
     }
@@ -80,8 +87,7 @@ export function UserProfile() {
 
     try {
       let normalized = phone
-      // Convert to +63 format if starts with 0
-      if (normalized.startsWith("09")) {
+      if (showPhone && normalized.startsWith("09")) {
         normalized = "+63" + normalized.slice(1)
       }
 
@@ -91,18 +97,21 @@ export function UserProfile() {
       if (cleanedFullName.length > 0) updates.fullName = cleanedFullName
       else if ((userProfile?.fullName ?? "") !== "") updates.fullName = null
 
-      if (normalized.length > 0) updates.phone = normalized
-      else if ((userProfile?.phone ?? "") !== "") updates.phone = null
+      if (showPhone) {
+        if (normalized.length > 0) updates.phone = normalized
+        else if ((userProfile?.phone ?? "") !== "") updates.phone = null
+      }
+      // If phone is hidden (admin), we never touch it.
 
       await updateUserProfile(user.uid, updates)
 
       setSuccess("Profile updated successfully!")
-      toast({
-        title: "Saved",
-        description: "Your profile changes have been saved.",
-      })
-      setPhone(normalized) // reflect +63 format immediately in field
-      if (normalized.length > 0) setIsEditingPhone(false)
+      toast({ title: "Saved", description: "Your profile changes have been saved." })
+
+      if (showPhone) {
+        setPhone(normalized) // reflect +63 format immediately
+        if (normalized.length > 0) setIsEditingPhone(false)
+      }
     } catch (err) {
       console.error("Error updating profile:", err)
       setError("Failed to update profile. Please try again.")
@@ -112,7 +121,7 @@ export function UserProfile() {
   }
 
   const showPhoneEditButton =
-    !!(userProfile?.phone && userProfile.phone.trim().length > 0) && !isEditingPhone
+    showPhone && !!(userProfile?.phone && userProfile.phone.trim().length > 0) && !isEditingPhone
 
   return (
     <Card>
@@ -148,9 +157,7 @@ export function UserProfile() {
                 disabled
                 className="bg-gray-50"
               />
-              <p className="text-xs text-gray-500">
-                Student ID cannot be changed
-              </p>
+              <p className="text-xs text-gray-500">Student ID cannot be changed</p>
             </div>
           )}
 
@@ -166,71 +173,71 @@ export function UserProfile() {
             <p className="text-xs text-gray-500">Email cannot be changed</p>
           </div>
 
-          {/* Phone number section */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="phone">Phone</Label>
-              {phoneMissing && (
-                <span className="rounded-full bg-red-600 text-white text-[10px] px-2 py-0.5">
-                  Required
-                </span>
-              )}
-            </div>
+          {/* Phone number section (hidden for admins) */}
+          {showPhone && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="phone">Phone</Label>
+                {phoneMissing && (
+                  <span className="rounded-full bg-red-600 text-white text-[10px] px-2 py-0.5">
+                    Required
+                  </span>
+                )}
+              </div>
 
-            <div className="relative">
-              {showPhoneEditButton && (
-                <button
-                  type="button"
-                  onClick={() => setIsEditingPhone(true)}
-                  className="absolute left-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-gray-100 z-20"
-                  aria-label="Edit phone number"
-                  title="Edit phone number"
-                >
-                  <Pencil className="h-4 w-4 text-gray-600" />
-                </button>
-              )}
-              <Input
-                ref={phoneRef}
-                id="phone"
-                type="tel"
-                inputMode="tel"
-                enterKeyHint="done"
-                maxLength={13}
-                placeholder="+639XXXXXXXXX"
-                value={phone}
-                onChange={onPhoneChange}
-                disabled={showPhoneEditButton && !isEditingPhone}
-                aria-invalid={!isPhoneValid}
-                className={[
-                  showPhoneEditButton && !isEditingPhone ? "pl-10" : "",
+              <div className="relative">
+                {showPhoneEditButton && (
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingPhone(true)}
+                    className="absolute left-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-gray-100 z-20"
+                    aria-label="Edit phone number"
+                    title="Edit phone number"
+                  >
+                    <Pencil className="h-4 w-4 text-gray-600" />
+                  </button>
+                )}
+                <Input
+                  ref={phoneRef}
+                  id="phone"
+                  type="tel"
+                  inputMode="tel"
+                  enterKeyHint="done"
+                  maxLength={13}
+                  placeholder="+639XXXXXXXXX"
+                  value={phone}
+                  onChange={onPhoneChange}
+                  disabled={showPhoneEditButton && !isEditingPhone}
+                  aria-invalid={!isPhoneValid}
+                  className={[
+                    showPhoneEditButton && !isEditingPhone ? "pl-10" : "",
+                    !isPhoneValid ? "border-red-500 focus-visible:ring-red-500" : "",
+                  ].join(" ")}
+                />
+              </div>
+
+              <p
+                className={`text-xs ${
                   !isPhoneValid
-                    ? "border-red-500 focus-visible:ring-red-500"
-                    : "",
-                ].join(" ")}
-              />
-            </div>
-
-            <p
-              className={`text-xs ${
-                !isPhoneValid
-                  ? "text-red-600"
+                    ? "text-red-600"
+                    : phoneMissing
+                    ? "text-red-600"
+                    : "text-gray-500"
+                }`}
+              >
+                {showPhoneEditButton && !isEditingPhone
+                  ? "Tap the pencil to edit your saved number"
                   : phoneMissing
-                  ? "text-red-600"
-                  : "text-gray-500"
-              }`}
-            >
-              {showPhoneEditButton && !isEditingPhone
-                ? "Tap the pencil to edit your saved number"
-                : phoneMissing
-                ? "Enter your number (09XXXXXXXXX). It will be saved as +639XXXXXXXXX."
-                : "You can type 09XXXXXXXXX or +639XXXXXXXXX. It will display in +63 format after saving."}
-            </p>
-          </div>
+                  ? "Enter your number (09XXXXXXXXX). It will be saved as +639XXXXXXXXX."
+                  : "You can type 09XXXXXXXXX or +639XXXXXXXXX. It will display in +63 format after saving."}
+              </p>
+            </div>
+          )}
 
           <Button
             type="submit"
             className="w-full bg-cyan-600 hover:bg-cyan-700 disabled:opacity-60"
-            disabled={loading || !hasChanges || !isPhoneValid}
+            disabled={loading || !hasChanges || (showPhone && !isPhoneValid)}
           >
             {loading ? "Saving..." : "Save Profile"}
           </Button>

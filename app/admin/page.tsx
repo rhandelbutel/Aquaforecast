@@ -38,7 +38,7 @@ export default function AdminPage() {
   const handleSignOut = async () => {
     try {
       await logout()
-      // Force redirect to home page from admin
+      
       router.push("/")
     } catch (error) {
       console.error("Error signing out:", error)
@@ -47,12 +47,11 @@ export default function AdminPage() {
     }
   }
 
-  // Wrap sign-out so we can show loading in the confirm button first
   const onConfirmSignOut = async () => {
     try {
-      setSigningOut(true)         // show spinner immediately
-      await sleep(700)            // optional: let the user see the spinner (adjust/remove as you like)
-      await handleSignOut()       // triggers redirect
+      setSigningOut(true)         
+      await sleep(700)            
+      await handleSignOut()       
     } catch (e) {
       console.error(e)
       setSigningOut(false)
