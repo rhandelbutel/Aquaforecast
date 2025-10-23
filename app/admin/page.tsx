@@ -7,12 +7,15 @@ import { isAdmin } from "@/lib/user-service"
 import { AdminUserManagement } from "@/components/admin/admin-user-management"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { LogOut, Shield } from "lucide-react"
+import { LogOut, Shield, Loader2 } from "lucide-react"
 
 export default function AdminPage() {
   const { user, logout, loading } = useAuth() as any
   const router = useRouter()
   const [showLogoutModal, setShowLogoutModal] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
+
+  const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms))
 
   // Wait for auth to finish before deciding
   if (loading) {
@@ -44,6 +47,18 @@ export default function AdminPage() {
     }
   }
 
+  // Wrap sign-out so we can show loading in the confirm button first
+  const onConfirmSignOut = async () => {
+    try {
+      setSigningOut(true)         // show spinner immediately
+      await sleep(700)            // optional: let the user see the spinner (adjust/remove as you like)
+      await handleSignOut()       // triggers redirect
+    } catch (e) {
+      console.error(e)
+      setSigningOut(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Mobile Header */}
@@ -54,7 +69,13 @@ export default function AdminPage() {
               <Shield className="h-6 w-6 text-blue-600 mr-2" />
               <h1 className="text-lg font-bold text-gray-900">Admin Panel</h1>
             </div>
-            <Button variant="outline" size="sm" onClick={() => setShowLogoutModal(true)} className="flex items-center">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowLogoutModal(true)}
+              className="flex items-center"
+              disabled={signingOut}
+            >
               <LogOut className="h-4 w-4 mr-1" />
               Sign Out
             </Button>
@@ -79,7 +100,12 @@ export default function AdminPage() {
                 <p className="text-sm font-medium text-gray-900">{user.email}</p>
                 <p className="text-xs text-gray-500">Administrator</p>
               </div>
-              <Button variant="outline" onClick={() => setShowLogoutModal(true)} className="flex items-center">
+              <Button
+                variant="outline"
+                onClick={() => setShowLogoutModal(true)}
+                className="flex items-center"
+                disabled={signingOut}
+              >
                 <LogOut className="h-4 w-4 mr-2" />
                 Sign Out
               </Button>
@@ -95,7 +121,7 @@ export default function AdminPage() {
 
       {/* Logout Confirmation Modal */}
       {showLogoutModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
           <Card className="w-full max-w-sm">
             <CardHeader>
               <CardTitle className="flex items-center">
@@ -106,11 +132,29 @@ export default function AdminPage() {
             <CardContent className="space-y-4">
               <p className="text-gray-600">Are you sure you want to sign out of the admin panel?</p>
               <div className="flex gap-3">
-                <Button variant="outline" className="flex-1 bg-transparent" onClick={() => setShowLogoutModal(false)}>
+                <Button
+                  variant="outline"
+                  className="flex-1 bg-transparent"
+                  onClick={() => setShowLogoutModal(false)}
+                  disabled={signingOut}
+                >
                   Cancel
                 </Button>
-                <Button variant="destructive" className="flex-1" onClick={handleSignOut}>
-                  Sign Out
+                <Button
+                  variant="destructive"
+                  className="flex-1"
+                  onClick={onConfirmSignOut}
+                  disabled={signingOut}
+                  aria-busy={signingOut}
+                >
+                  {signingOut ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Signing out…
+                    </>
+                  ) : (
+                    "Sign Out"
+                  )}
                 </Button>
               </div>
             </CardContent>
