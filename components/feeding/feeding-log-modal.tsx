@@ -74,10 +74,10 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
     const biomassKg = (abw * estimatedAlive) / 1000
     return biomassKg * (rate / 100)
   }, [abw, estimatedAlive, rate, feedingFrequency])
-  const perFeedingGrams = useMemo(() => (dailyFeedKg ? Math.round((dailyFeedKg / feedingFrequency) * 1000) : null), [
-    dailyFeedKg,
-    feedingFrequency,
-  ])
+  const perFeedingGrams = useMemo(
+    () => (dailyFeedKg ? Math.round((dailyFeedKg / feedingFrequency) * 1000) : null),
+    [dailyFeedKg, feedingFrequency]
+  )
 
   /* reset when open */
   useEffect(() => {
@@ -122,21 +122,28 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
     })()
   }, [isOpen, user, sharedPondId, selectedPond])
 
-  /* schedule helpers */
+  /* slot helpers */
   const makePHDate = (base: Date, hhmm: string) => {
     const [hh, mm] = hhmm.split(":").map(Number)
     return toUTCFromPH(fmtDatePH(base), `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`)
   }
+
   const todaySlotsUTC = useMemo(() => {
     if (!schedule) return []
     const today = new Date()
     return schedule.feedingTimes.map((t) => makePHDate(today, t)).sort((a, b) => a.getTime() - b.getTime())
   }, [schedule])
 
+  const fedTimes = useMemo(() => logs.map((l) => new Date(l.fedAt).getTime()), [logs])
   const nextSlot = useMemo<Date | null>(() => {
     const now = new Date()
-    return todaySlotsUTC.find((s) => s.getTime() >= now.getTime()) ?? null
-  }, [todaySlotsUTC])
+    return (
+      todaySlotsUTC.find((s) => {
+        const isFed = fedTimes.some((f) => Math.abs(f - s.getTime()) < 15 * 60 * 1000)
+        return !isFed && s >= now
+      }) ?? null
+    )
+  }, [todaySlotsUTC, fedTimes])
 
   const handleInputChange = (field: "date" | "time" | "feedGiven", value: string) => {
     if (field === "date") {
@@ -180,11 +187,10 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
         autoLogged: false,
         reason: "manual",
       })
-
       await pushFeedingVarianceInsight(sharedPondId, selectedPond.name, grams, perFeedingGrams ?? null).catch(() => {})
       setSuccess("Feeding logged successfully!")
+      onSuccess?.()
       setTimeout(() => {
-        onSuccess?.()
         onClose()
         const { date, time } = nowStringsPH()
         setFormData({ date, time, feedGiven: "" })
@@ -198,15 +204,42 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
     }
   }
 
+  /* auto-add missed logs */
+  useEffect(() => {
+    if (!schedule || !logs.length || !user || !sharedPondId || !selectedPond) return
+    const now = new Date()
+    schedule.feedingTimes.forEach(async (t) => {
+      const slot = makePHDate(now, t)
+      const alreadyLogged = logs.some((l) => Math.abs(new Date(l.fedAt).getTime() - slot.getTime()) < 15 * 60 * 1000)
+      if (!alreadyLogged && slot < now) {
+        try {
+          await addFeedingLog({
+            pondId: sharedPondId,
+            adminPondId: sharedPondId,
+            pondName: selectedPond.name,
+            userId: user.uid,
+            userDisplayName: user.displayName || undefined,
+            userEmail: user.email || undefined,
+            fedAt: slot,
+            feedGiven: undefined,
+            feedUnit: "g",
+            autoLogged: true,
+            reason: "missed_schedule",
+          })
+        } catch (e) {
+          console.warn("Failed to auto-insert missed log", e)
+        }
+      }
+    })
+  }, [schedule, logs])
+
   const startSubmitWithGuards = (fedAt: Date, grams: number) => {
     if (feedingFrequency > 0 && countTodayLogs() >= feedingFrequency) {
       setError(`Daily limit reached (${feedingFrequency}×/day).`)
       return
     }
-
     const now = new Date()
     const early = !!nextSlot && now < nextSlot && fedAt.getTime() <= now.getTime()
-
     if (early && nextSlot) {
       const minutesUntilNext = Math.ceil((nextSlot.getTime() - now.getTime()) / 60000)
       if (minutesUntilNext > 60) {
@@ -219,7 +252,6 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
         return
       }
     }
-
     if (perFeedingGrams != null && grams !== perFeedingGrams) {
       setPendingAmount({ fedAt, grams })
       setConfirmAmountOpen(true)
@@ -238,43 +270,23 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
     startSubmitWithGuards(when, Math.round(grams))
   }
 
-  /* render */
   if (!isOpen) return null
-  if (!selectedPond) {
-    return (
-      <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-xl">Log Feeding</CardTitle>
-            <Button variant="ghost" size="sm" onClick={onClose}><X className="h-4 w-4" /></Button>
-          </CardHeader>
-          <CardContent>
-            <Alert><AlertDescription>No pond available. Please add a pond first.</AlertDescription></Alert>
-            <Button className="w-full mt-4" onClick={onClose}>Close</Button>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      {/* --- main modal --- */}
+      <div className="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4">
         <Card className="w-full max-w-md sm:max-w-lg max-h-[90vh] overflow-y-auto">
-          <CardHeader className="sticky top-0 bg-white z-10 flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardHeader className="sticky top-0 bg-white z-10 flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-xl">Log Feeding</CardTitle>
             <Button variant="ghost" size="sm" onClick={onClose}><X className="h-4 w-4" /></Button>
           </CardHeader>
-
           <CardContent className="pb-6">
             <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Pond */}
               <div className="space-y-2">
                 <Label>Pond</Label>
                 <Input value={selectedPond.name} disabled className="bg-gray-50" />
               </div>
-
-              {/* Date */}
               <div className="space-y-2">
                 <Label>Date</Label>
                 <div className="relative">
@@ -282,37 +294,17 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
                   <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
                 </div>
               </div>
-
-              {/* Time */}
               <div className="space-y-2">
                 <Label>Time</Label>
                 <div className="relative">
-                  <Input
-                    type="time"
-                    value={formData.time}
-                    max={formData.date === currentDate ? currentTime : undefined}
-                    onChange={(e) => handleInputChange("time", e.target.value)}
-                    required
-                  />
+                  <Input type="time" value={formData.time} max={formData.date === currentDate ? currentTime : undefined} onChange={(e) => handleInputChange("time", e.target.value)} required />
                   <Clock className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
                 </div>
               </div>
-
-              {/* Amount */}
               <div className="space-y-2">
                 <Label>Feed Given (g)</Label>
-                <Input
-                  type="number"
-                  step="1"
-                  min="0"
-                  placeholder={perFeedingGrams != null ? String(perFeedingGrams) : "e.g., 150"}
-                  value={formData.feedGiven}
-                  onChange={(e) => handleInputChange("feedGiven", e.target.value)}
-                  required
-                />
+                <Input type="number" step="1" min="0" placeholder={perFeedingGrams != null ? String(perFeedingGrams) : "e.g., 150"} value={formData.feedGiven} onChange={(e) => handleInputChange("feedGiven", e.target.value)} required />
               </div>
-
-              {/* Suggestions */}
               <div className="p-3 rounded-lg bg-blue-50 text-sm">
                 <div className="flex items-start gap-2">
                   <Lightbulb className="h-4 w-4 mt-0.5 text-blue-600" />
@@ -327,90 +319,51 @@ export function FeedingLogModal({ isOpen, onClose, onSuccess }: FeedingLogModalP
                       <div className="text-blue-900/80">Per feeding:</div><div className="font-semibold">{perFeedingGrams ?? "—"} g</div>
                     </div>
                     <div className="mt-2">
-                      <Button type="button" variant="outline" className="h-8 px-3 bg-white" onClick={applySuggestion} disabled={perFeedingGrams == null}>
-                        Use suggestion
-                      </Button>
+                      <Button type="button" variant="outline" className="h-8 px-3 bg-white" onClick={applySuggestion} disabled={perFeedingGrams == null}>Use suggestion</Button>
                     </div>
                   </div>
                 </div>
               </div>
-
-              {error && (
-                <Alert variant="destructive" className="mt-2">
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              )}
-              {success && (
-                <Alert className="mt-2 border-green-200 bg-green-50">
-                  <AlertDescription className="text-green-800">{success}</AlertDescription>
-                </Alert>
-              )}
-
+              {error && (<Alert variant="destructive" className="mt-2"><AlertDescription>{error}</AlertDescription></Alert>)}
+              {success && (<Alert className="mt-2 border-green-200 bg-green-50"><AlertDescription className="text-green-800">{success}</AlertDescription></Alert>)}
               <div className="flex gap-3 pt-2">
                 <Button type="button" variant="outline" className="flex-1 bg-transparent" onClick={onClose} disabled={loading}>Cancel</Button>
-                <Button type="submit" className="flex-1 bg-cyan-600 hover:bg-cyan-700" disabled={loading}>
-                  {loading ? "Logging..." : "Log Feeding"}
-                </Button>
+                <Button type="submit" className="flex-1 bg-cyan-600 hover:bg-cyan-700" disabled={loading}>{loading ? "Logging..." : "Log Feeding"}</Button>
               </div>
             </form>
           </CardContent>
         </Card>
       </div>
 
-      {/* Too-early restriction */}
+      {/* --- Dialogs --- */}
       <Dialog open={tooEarlyOpen} onOpenChange={setTooEarlyOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Too early to log</DialogTitle></DialogHeader>
           <div className="text-sm">
-            {nextSlot
-              ? <>You can only feed within <b>60 minutes</b> before the next schedule. Next time is <b>{fmtTimePH(nextSlot)}</b>.</>
-              : <>You can only feed within 60 minutes before the next scheduled time.</>}
+            {nextSlot ? <>You can only feed within <b>60 minutes</b> before the next schedule. Next time is <b>{fmtTimePH(nextSlot)}</b>.</> : <>You can only feed within 60 minutes before the next scheduled time.</>}
           </div>
-          <DialogFooter className="mt-4">
-            <Button onClick={() => setTooEarlyOpen(false)}>OK</Button>
-          </DialogFooter>
+          <DialogFooter className="mt-4"><Button onClick={() => setTooEarlyOpen(false)}>OK</Button></DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* 0–60 min early confirmation */}
       <Dialog open={confirmEarlyOpen} onOpenChange={setConfirmEarlyOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Log earlier than schedule?</DialogTitle></DialogHeader>
-          <div className="text-sm">
-            {nextSlot ? <>Next scheduled time today is <b>{fmtTimePH(nextSlot)}</b>. Continue?</> : <>Continue?</>}
-          </div>
+          <div className="text-sm">{nextSlot ? <>Next scheduled time today is <b>{fmtTimePH(nextSlot)}</b>. Continue?</> : <>Continue?</>}</div>
           <DialogFooter className="mt-4">
             <Button variant="outline" onClick={() => setConfirmEarlyOpen(false)}>Cancel</Button>
-            <Button
-              onClick={() => {
-                if (!pendingEarly) return
-                setConfirmEarlyOpen(false)
-                if (perFeedingGrams != null && pendingEarly.grams !== perFeedingGrams) {
-                  setPendingAmount(pendingEarly)
-                  setConfirmAmountOpen(true)
-                } else {
-                  void doSubmit(pendingEarly.fedAt, pendingEarly.grams)
-                }
-              }}
-            >
-              Yes, log now
-            </Button>
+            <Button onClick={() => { if (!pendingEarly) return; setConfirmEarlyOpen(false); if (perFeedingGrams != null && pendingEarly.grams !== perFeedingGrams) { setPendingAmount(pendingEarly); setConfirmAmountOpen(true) } else { void doSubmit(pendingEarly.fedAt, pendingEarly.grams) } }}>Yes, log now</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Amount confirmation */}
       <Dialog open={confirmAmountOpen} onOpenChange={setConfirmAmountOpen}>
         <DialogContent>
           <DialogHeader><DialogTitle>Confirm feeding amount</DialogTitle></DialogHeader>
-          <div className="text-sm">
-            {pendingAmount && <>You entered <b>{pendingAmount.grams} g</b>, suggestion is <b>{perFeedingGrams ?? "—"} g</b>. Continue?</>}
-          </div>
+          <div className="text-sm">{pendingAmount && <>You entered <b>{pendingAmount.grams} g</b>, suggestion is <b>{perFeedingGrams ?? "—"} g</b>. Continue?</>}</div>
           <DialogFooter className="mt-4">
             <Button variant="outline" onClick={() => setConfirmAmountOpen(false)}>Cancel</Button>
-            <Button onClick={() => { if (!pendingAmount) return; setConfirmAmountOpen(false); void doSubmit(pendingAmount.fedAt, pendingAmount.grams) }}>
-              Confirm
-            </Button>
+            <Button onClick={() => { if (!pendingAmount) return; setConfirmAmountOpen(false); void doSubmit(pendingAmount.fedAt, pendingAmount.grams) }}>Confirm</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

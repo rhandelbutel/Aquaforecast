@@ -6,8 +6,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Fish } from 'lucide-react'
+import { PondData } from '@/lib/pond-service'
 
-export function StockingDensity() {
+interface StockingDensityProps {
+  ponds: PondData[]
+}
+
+export function StockingDensity({ ponds }: StockingDensityProps) {
   const [pondArea, setPondArea] = useState('')
   const [fishCount, setFishCount] = useState('')
   const [result, setResult] = useState<number | null>(null)

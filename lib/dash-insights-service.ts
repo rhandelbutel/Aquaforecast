@@ -1,4 +1,3 @@
-// lib/dash-insights-service.ts
 "use client";
 
 import { useEffect, useState } from "react";
@@ -14,6 +13,8 @@ import {
   updateDoc,
   type Unsubscribe,
 } from "firebase/firestore";
+import { getMortalityLogs } from "./mortality-service";
+import { GrowthService } from "./growth-service";
 
 /** --- Types (scoped to dashboard only) --- */
 export type DashSeverity = "info" | "warning" | "danger" | "error";
@@ -402,7 +403,7 @@ export async function notifyABWLoggedDash(
   currentABW: number,
   targetWeight?: number | null
 ) {
-  // --- NEW INSIGHT: Partial Harvest Recommendation ---
+  // --- NEW INSIGHT: Partial Harvest Recommended ---
   const lower = 100;
   const upper = 150;
   if (currentABW >= lower && currentABW <= upper) {
@@ -419,7 +420,6 @@ export async function notifyABWLoggedDash(
       evidence: { currentABW },
     });
   } else {
-    // auto-resolve if below 100g or after harvest
     await resolveDashInsight(pondId, "dash_partial_harvest").catch(() => {});
   }
 
@@ -463,8 +463,67 @@ export async function notifyABWLoggedDash(
   });
 }
 
+/* ---------- 15-Day Due Reminders (Info) ---------- */
+export async function detectMortalityDueDash(pondId: string, pondName?: string) {
+  try {
+    const logs = await getMortalityLogs(pondId);
+    const last = logs[0]?.date ?? null;
+    const DAY_MS = 86_400_000;
+    const days = last ? Math.floor((Date.now() - last.getTime()) / DAY_MS) : 999;
+
+    if (days >= 15) {
+      await upsertDash(pondId, "dash_mortality_due", {
+        key: "dash_mortality_due",
+        title: "Mortality Log Due",
+        message: last
+          ? `It’s been ${days} days since your last mortality record (${last.toLocaleDateString()}). Please log a new entry.`
+          : "No mortality record found yet. Please log one to begin tracking.",
+        severity: "info",
+        category: "growth",
+        suggestedAction:
+          "Open the Mortality Log and record the latest observations.",
+      });
+    } else {
+      await resolveDashInsight(pondId, "dash_mortality_due").catch(() => {});
+    }
+  } catch (e) {
+    console.error("detectMortalityDueDash error:", e);
+  }
+}
+
+export async function detectGrowthDueDash(pondId: string, userId: string) {
+  try {
+    const setup = await GrowthService.getGrowthSetup(pondId, userId);
+    const last = setup?.lastABWUpdate ?? null;
+    const now = new Date();
+    const lastDate =
+      last instanceof Date ? last : (last as any)?.toDate?.() ?? null;
+    const days =
+      lastDate == null
+        ? 999
+        : Math.floor((now.getTime() - lastDate.getTime()) / 86_400_000);
+
+    if (days >= 15) {
+      await upsertDash(pondId, "dash_growth_due", {
+        key: "dash_growth_due",
+        title: "Growth Update Due",
+        message: lastDate
+          ? `It’s been ${days} days since your last growth update (${lastDate.toLocaleDateString()}). Please record a new ABW.`
+          : "No growth data found yet. Set up your initial growth tracking to start predictions.",
+        severity: "info",
+        category: "growth",
+        suggestedAction:
+          "Open Growth Setup to record or update the average body weight.",
+      });
+    } else {
+      await resolveDashInsight(pondId, "dash_growth_due").catch(() => {});
+    }
+  } catch (e) {
+    console.error("detectGrowthDueDash error:", e);
+  }
+}
+
 /* --------- Aliases for back-compat --------- */
 export const pushFeedingVarianceInsight = notifyFeedingDeviationDash;
 export const pushABWLoggedInsight = notifyABWLoggedDash;
 export { upsertDash };
-

@@ -6,8 +6,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { TrendingUp } from 'lucide-react'
+import { PondData } from '@/lib/pond-service'
 
-export function GrowthRate() {
+interface GrowthRateProps {
+  ponds: PondData[]
+}
+
+export function GrowthRate({ ponds }: GrowthRateProps) {
   const [initialWeight, setInitialWeight] = useState('')
   const [finalWeight, setFinalWeight] = useState('')
   const [days, setDays] = useState('')

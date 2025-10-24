@@ -1,74 +1,91 @@
+// app/api/utils/link-users-to-pond/route.ts
 import { NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
+
+let cachedAdminPond: any = null;
+let lastFetch = 0;
 
 export async function GET() {
   try {
     console.log("🔗 Starting user-to-pond linking...");
 
-    // Get the shared admin pond (first pond document)
-    const pondsSnap = await adminDb.collection("ponds").limit(1).get();
-    if (pondsSnap.empty) {
-      console.error("❌ No admin pond found.");
-      return NextResponse.json({ ok: false, error: "No admin pond found." }, { status: 404 });
+    // ✅ Cache the shared admin pond for 10 minutes
+    const now = Date.now();
+    if (!cachedAdminPond || now - lastFetch > 10 * 60 * 1000) {
+      console.log("🔍 Fetching admin pond...");
+      try {
+        const pondsSnap = await adminDb.collection("ponds").limit(1).get();
+        if (pondsSnap.empty) {
+          console.error("❌ No admin pond found.");
+          return NextResponse.json({ ok: false, error: "No admin pond found." }, { status: 404 });
+        }
+        cachedAdminPond = pondsSnap.docs[0];
+        lastFetch = now;
+      } catch (err: any) {
+        if (err.code === 8) {
+          console.error("⚠️ Firestore quota exceeded when fetching ponds.");
+          return NextResponse.json({ ok: false, error: "Quota exceeded" }, { status: 429 });
+        }
+        throw err;
+      }
     }
 
-    const pondDoc = pondsSnap.docs[0];
-    const pond = pondDoc.data();
+    const adminPond = cachedAdminPond.data();
+    const adminPondId = cachedAdminPond.id;
 
-    // Get all approved users
-    const usersSnap = await adminDb.collection("users").where("status", "==", "approved").get();
+    console.log(`✅ Found shared pond: ${adminPond.pondName || "Unnamed"} (${adminPondId})`);
+
+    // Fetch approved users
+    let usersSnap;
+    try {
+      usersSnap = await adminDb.collection("users").where("status", "==", "approved").get();
+    } catch (err: any) {
+      if (err.code === 8) {
+        console.error("⚠️ Firestore quota exceeded when fetching users.");
+        return NextResponse.json({ ok: false, error: "Quota exceeded" }, { status: 429 });
+      }
+      throw err;
+    }
+
     if (usersSnap.empty) {
-      console.log("⚠️ No approved users to link.");
-      return NextResponse.json({ ok: true, linked: 0, message: "No approved users" });
+      console.log("⚠️ No approved users found.");
+      return NextResponse.json({ ok: false, note: "No approved users" });
     }
 
-    let linkedCount = 0;
-
+    let linked = 0;
     for (const userDoc of usersSnap.docs) {
       const user = userDoc.data();
       const userId = user.uid;
-      const userEmail = user.email;
+      const email = user.email;
 
-      // Check if already linked
-      const existing = await adminDb
+      const userPondSnap = await adminDb
         .collection("user-ponds")
         .where("userId", "==", userId)
-        .where("adminPondId", "==", pondDoc.id)
+        .where("adminPondId", "==", adminPondId)
         .limit(1)
         .get();
 
-      if (!existing.empty) {
-        console.log(`🔁 ${userEmail} already linked to ${pondDoc.id}`);
+      if (!userPondSnap.empty) {
+        console.log(`✅ Already linked: ${email}`);
         continue;
       }
 
-      // Create link document
       await adminDb.collection("user-ponds").add({
         userId,
-        adminPondId: pondDoc.id,
-        adminPond: {
-          id: pondDoc.id,
-          name: pond.name ?? "Pond",
-          fishSpecies: pond.fishSpecies ?? "",
-          area: pond.area ?? 0,
-          depth: pond.depth ?? 0,
-          initialFishCount: pond.initialFishCount ?? pond.fishCount ?? 0,
-          feedingFrequency: pond.feedingFrequency ?? 0,
-          sensorId: pond.sensorId ?? "",
-          createdAt: pond.createdAt ?? new Date(),
-          updatedAt: pond.updatedAt ?? new Date(),
-        },
-        attachedAt: new Date(),
+        userEmail: email,
+        adminPondId,
+        pondName: adminPond.pondName || "Unnamed Pond",
+        linkedAt: new Date(),
       });
 
-      console.log(`✅ Linked ${userEmail} → ${pondDoc.id}`);
-      linkedCount++;
+      console.log(`✅ Linked ${email} → ${adminPond.pondName}`);
+      linked++;
     }
 
-    console.log(`🎯 Linking complete. ${linkedCount} user(s) linked.`);
-    return NextResponse.json({ ok: true, linked: linkedCount });
-  } catch (error: any) {
+    console.log(`🔗 Linking complete. Total new links: ${linked}`);
+    return NextResponse.json({ ok: true, linked });
+  } catch (error) {
     console.error("❌ link-users-to-pond error:", error);
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: false, error: (error as Error).message }, { status: 500 });
   }
 }

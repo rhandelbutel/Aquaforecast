@@ -7,8 +7,13 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Droplets } from 'lucide-react'
+import { PondData } from '@/lib/pond-service'
 
-export function WaterVolume() {
+interface WaterVolumeProps {
+  ponds: PondData[]
+}
+
+export function WaterVolume({ ponds }: WaterVolumeProps) {
   const [length, setLength] = useState('')
   const [width, setWidth] = useState('')
   const [depth, setDepth] = useState('')

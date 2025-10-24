@@ -3,7 +3,7 @@ import { FeedCalculator } from './feed-calculator'
 import { StockingDensity } from './stocking-density'
 import { WaterVolume } from './water-volume'
 import { GrowthRate } from './growth-rate'
-import { CalculationsExport } from './calculations-export'
+// import { CalculationsExport } from './calculations-export'
 
 interface CalculationsWithPondsProps {
   ponds: PondData[]
@@ -17,7 +17,7 @@ export function CalculationsWithPonds({ ponds }: CalculationsWithPondsProps) {
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Calculations</h1>
           <p className="text-gray-600 mt-1">Essential aquaculture calculations and tools</p>
         </div>
-        <CalculationsExport />
+        {/* <CalculationsExport /> */}
       </div>
 
       <div className="space-y-6">

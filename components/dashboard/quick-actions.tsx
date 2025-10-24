@@ -1,4 +1,3 @@
-// components/dashboard/quick-actions.tsx
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
@@ -11,11 +10,12 @@ import { FeedingScheduleModal } from "@/components/feeding/feeding-schedule-moda
 import { FeedingLogModal } from "@/components/feeding/feeding-log-modal"
 import { MortalityLogModal } from "@/components/mortality/mortality-log-modal"
 import { GrowthSetupModal } from "@/components/growth/growth-setup-modal"
-import ExportModal from "@/components/export/export-modal" 
+import ExportModal from "@/components/export/export-modal"
 
 import type { UnifiedPond } from "@/lib/pond-context"
 import { feedingScheduleService, type FeedingSchedule } from "@/lib/feeding-schedule-service"
 import { subscribeMortalityLogs, type MortalityLog } from "@/lib/mortality-service"
+import { GrowthService } from "@/lib/growth-service"
 import { useAuth } from "@/lib/auth-context"
 import { subscribeUserProfile } from "@/lib/user-service"
 
@@ -35,7 +35,7 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
   const [showScheduleModal, setShowScheduleModal] = useState(false)
   const [showMortalityModal, setShowMortalityModal] = useState(false)
   const [showGrowthSetupModal, setShowGrowthSetupModal] = useState(false)
-  const [showExportModal, setShowExportModal] = useState(false) // 👈 NEW
+  const [showExportModal, setShowExportModal] = useState(false)
 
   const sharedPondId = (pond as any)?.adminPondId || pond?.id
 
@@ -66,6 +66,20 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
     })
     return () => { try { unsub?.() } catch {} }
   }, [sharedPondId])
+
+  // ---- Growth cadence (NEW) ----
+  const [growthDue, setGrowthDue] = useState(false)
+  useEffect(() => {
+    if (!sharedPondId || !user?.uid) return
+    const unsub = GrowthService.subscribeGrowthSetup(sharedPondId, (setup) => {
+      if (!setup) {
+        setGrowthDue(true)
+      } else {
+        setGrowthDue(GrowthService.canUpdateABW(setup.lastABWUpdate))
+      }
+    })
+    return () => { try { unsub?.() } catch {} }
+  }, [sharedPondId, user?.uid])
 
   // tick for minute-level badges
   const [nowTick, setNowTick] = useState(() => Date.now())
@@ -166,7 +180,7 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
               )}
             </Button>
 
-            {/* Growth setup */}
+            {/* Growth setup with DUE badge */}
             <Button
               variant="outline"
               className="relative w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
@@ -174,6 +188,11 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
             >
               <Scale className="h-6 w-6 text-blue-600" />
               <span className="text-sm">Growth Setup</span>
+              {growthDue && (
+                <span className="absolute -top-2 -right-2 rounded-full bg-indigo-600 text-white text-[10px] px-2 py-0.5 shadow">
+                  Due
+                </span>
+              )}
             </Button>
 
             {/* Schedule feeding */}
@@ -205,7 +224,7 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
             <Button
               variant="outline"
               className="w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
-              onClick={() => setShowExportModal(true)} // 👈 NEW
+              onClick={() => setShowExportModal(true)}
             >
               <Download className="h-6 w-6 text-purple-600" />
               <span className="text-sm">Export Data</span>
@@ -252,7 +271,7 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
         onSuccess={() => setShowGrowthSetupModal(false)}
       />
 
-      {/* Export Modal 👇 NEW */}
+      {/* Export Modal */}
       <ExportModal
         open={showExportModal}
         onCloseAction={() => setShowExportModal(false)}

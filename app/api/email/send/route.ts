@@ -59,7 +59,7 @@ export async function POST(req: Request) {
 
       // ---------- FEEDING ALERT EMAILS ----------
       case "feeding-reminder":
-        subject = "Feeding Reminder – Scheduled Feeding in 1 Hour";
+        subject = "Feeding Reminder – Scheduled Feeding is coming up very soon!";
         html = `
           <p>Hello,</p>
           <p>This is a friendly reminder that your next feeding time is coming up <b>soon</b>.</p>

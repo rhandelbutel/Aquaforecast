@@ -1,3 +1,4 @@
+// components/growth/growth-setup-modal.tsx
 "use client"
 
 import { useState, useEffect } from "react"
@@ -37,13 +38,15 @@ export function GrowthSetupModal({
   const [existingSetup, setExistingSetup] = useState<GrowthSetup | null>(null)
   const [daysUntilNextUpdate, setDaysUntilNextUpdate] = useState(0)
 
-  // history preview
   const [history, setHistory] = useState<GrowthHistory[]>([])
   const [lastABW, setLastABW] = useState<number | null>(null)
   const [prevABW, setPrevABW] = useState<number | null>(null)
   const [weeklyGrowth, setWeeklyGrowth] = useState<number>(0)
-
   const [previewOpen, setPreviewOpen] = useState(false)
+
+  // 🚨 New restriction dialog states
+  const [showLowerAbwWarning, setShowLowerAbwWarning] = useState(false)
+  const [showInvalidTargetWarning, setShowInvalidTargetWarning] = useState(false)
 
   const sharedPondId = pond.adminPondId || pond.id
 
@@ -53,7 +56,13 @@ export function GrowthSetupModal({
     !!v && typeof (v as any).seconds === "number"
   const safeDate = (value: unknown): Date | null => {
     if (!value) return null
-    if (isTimestampLike(value)) { try { return value.toDate() } catch { return null } }
+    if (isTimestampLike(value)) {
+      try {
+        return value.toDate()
+      } catch {
+        return null
+      }
+    }
     if (isSecondsLike(value)) return new Date(value.seconds * 1000)
     const d = new Date(value as any)
     return isNaN(d.getTime()) ? null : d
@@ -70,22 +79,20 @@ export function GrowthSetupModal({
         const prev = items[1]?.abw ?? null
         setLastABW(latest)
         setPrevABW(prev)
-        const growth = latest != null && prev != null ? Number((latest - prev).toFixed(2)) : 0
+        const growth =
+          latest != null && prev != null ? Number((latest - prev).toFixed(2)) : 0
         setWeeklyGrowth(growth)
       })
       return () => unsub()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, sharedPondId, isOpen])
 
   const loadExistingSetup = async () => {
     if (!user) return
     try {
       const setup = await GrowthService.getGrowthSetup(sharedPondId, user.uid)
-
       if (setup) {
         setExistingSetup(setup)
-        // Show empty if not set yet
         setCurrentABW(setup.currentABW > 0 ? String(setup.currentABW) : "")
         setTargetWeight(
           typeof setup.targetWeight === "number" && setup.targetWeight > 0
@@ -126,11 +133,7 @@ export function GrowthSetupModal({
 
     const currentABWValue = existingSetup?.currentABW ?? parseFloat(currentABW)
     if (!isNaN(target) && target > 0 && target <= currentABWValue) {
-      toast({
-        title: "Error",
-        description: "Target weight must be greater than current weight",
-        variant: "destructive",
-      })
+      setShowInvalidTargetWarning(true)
       return false
     }
 
@@ -176,12 +179,15 @@ export function GrowthSetupModal({
       return
     }
 
+    // ✅ NEW: Restrict lower ABW input than previous (with popup)
+    if (lastABW !== null && abw < lastABW) {
+      setShowLowerAbwWarning(true)
+      return
+    }
+
+    // ✅ NEW: Restrict invalid target weight (with popup)
     if (!isNaN(target) && target > 0 && target <= abw) {
-      toast({
-        title: "Error",
-        description: "Target weight must be greater than current weight",
-        variant: "destructive",
-      })
+      setShowInvalidTargetWarning(true)
       return
     }
 
@@ -194,10 +200,11 @@ export function GrowthSetupModal({
     ) {
       const success = await handleUpdateTargetWeight(target)
       if (success) {
-        /* NEW: transient ABW insight on target-only change */
-        if (!isNaN(target) && target > 0) {
-          try { await pushABWLoggedInsight(sharedPondId, existingSetup.currentABW, target) } catch {}
-        }
+        try {
+          if (!isNaN(target) && target > 0) {
+            await pushABWLoggedInsight(sharedPondId, existingSetup.currentABW, target)
+          }
+        } catch {}
         onSuccess?.()
         onClose()
       }
@@ -224,7 +231,6 @@ export function GrowthSetupModal({
         !existingSetup
       )
 
-      // Push the 5-min dashboard tip (uses target if provided)
       try {
         await pushABWLoggedInsight(
           sharedPondId,
@@ -259,12 +265,25 @@ export function GrowthSetupModal({
     !!existingSetup && !GrowthService.canUpdateABW(existingSetup.lastABWUpdate)
 
   const headerStatus =
-    existingSetup && (daysUntilNextUpdate > 0
-      ? { tone: "text-yellow-700", text: `Next ABW update available in ${daysUntilNextUpdate} days` }
-      : { tone: "text-green-700", text: "Weekly ABW due: you can record a new ABW now" })
+    existingSetup &&
+    (daysUntilNextUpdate > 0
+      ? {
+          tone: "text-yellow-700",
+          text: `Next ABW update available in ${daysUntilNextUpdate} days`,
+        }
+      : {
+          tone: "text-green-700",
+          text: "Weekly ABW due: you can record a new ABW now",
+        })
 
-  const showABWNotSet = !!existingSetup && (existingSetup.currentABW ?? 0) <= 0
-  const showTargetNotSet = !!existingSetup && !(typeof existingSetup.targetWeight === "number" && existingSetup.targetWeight > 0)
+  const showABWNotSet =
+    !!existingSetup && (existingSetup.currentABW ?? 0) <= 0
+  const showTargetNotSet =
+    !!existingSetup &&
+    !(
+      typeof existingSetup.targetWeight === "number" &&
+      existingSetup.targetWeight > 0
+    )
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -276,7 +295,6 @@ export function GrowthSetupModal({
           </DialogTitle>
         </DialogHeader>
 
-        {/* Status / Guidance */}
         {existingSetup && headerStatus && (
           <div className={`mb-2 text-xs flex items-center gap-2 ${headerStatus.tone}`}>
             <AlertCircle className="h-4 w-4" />
@@ -290,7 +308,9 @@ export function GrowthSetupModal({
               <Label htmlFor="currentABW" className="flex items-center gap-2">
                 <Scale className="h-4 w-4" />
                 Current Average Body Weight (g)
-                {showABWNotSet && <span className="text-xs text-gray-500">(not set)</span>}
+                {showABWNotSet && (
+                  <span className="text-xs text-gray-500">(not set)</span>
+                )}
               </Label>
               <Input
                 id="currentABW"
@@ -308,7 +328,9 @@ export function GrowthSetupModal({
               <Label htmlFor="targetWeight" className="flex items-center gap-2">
                 <Target className="h-4 w-4" />
                 Target Weight (g)
-                {showTargetNotSet && <span className="text-xs text-gray-500">(not set)</span>}
+                {showTargetNotSet && (
+                  <span className="text-xs text-gray-500">(not set)</span>
+                )}
               </Label>
               <Input
                 id="targetWeight"
@@ -323,13 +345,26 @@ export function GrowthSetupModal({
             </div>
           </div>
 
-          {/* Preview & History */}
-          <Collapsible open={previewOpen} onOpenChange={setPreviewOpen} className="rounded-lg border">
+          {/* Growth Preview */}
+          <Collapsible
+            open={previewOpen}
+            onOpenChange={setPreviewOpen}
+            className="rounded-lg border"
+          >
             <div className="flex items-center justify-between px-3 py-2">
               <p className="text-sm font-medium">Growth Preview</p>
               <CollapsibleTrigger asChild>
-                <Button variant="ghost" size="sm" className="h-8 w-8 p-0" aria-label="Toggle preview">
-                  <ChevronDown className={`h-4 w-4 transition-transform ${previewOpen ? "rotate-180" : ""}`} />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  aria-label="Toggle preview"
+                >
+                  <ChevronDown
+                    className={`h-4 w-4 transition-transform ${
+                      previewOpen ? "rotate-180" : ""
+                    }`}
+                  />
                 </Button>
               </CollapsibleTrigger>
             </div>
@@ -349,25 +384,6 @@ export function GrowthSetupModal({
                   <p className="font-semibold">{weeklyGrowth}</p>
                 </div>
               </div>
-
-              <div className="mt-3">
-                <p className="text-xs text-gray-500 mb-1">Recent ABW History</p>
-                <ul className="space-y-1 max-h-28 overflow-auto pr-1">
-                  {history.slice(0, 6).map((h) => {
-                    const d = safeDate(h.recordedAt)
-                    const when = d ? d.toLocaleString() : "—"
-                    return (
-                      <li key={h.id} className="text-xs flex justify-between border-b py-1">
-                        <span>{when}</span>
-                        <span className="font-medium">{h.abw} g</span>
-                      </li>
-                    )
-                  })}
-                  {history.length === 0 && (
-                    <li className="text-xs text-gray-500">No history yet. Growth will show 0.</li>
-                  )}
-                </ul>
-              </div>
             </CollapsibleContent>
           </Collapsible>
 
@@ -376,10 +392,64 @@ export function GrowthSetupModal({
               Cancel
             </Button>
             <Button type="submit" disabled={isLoading}>
-              {isLoading ? "Saving..." : existingSetup ? "Update" : "Set Up"}
+              {isLoading
+                ? "Saving..."
+                : existingSetup
+                ? "Update"
+                : "Set Up"}
             </Button>
           </div>
         </form>
+
+        {/* ⚠️ Warning: Lower ABW */}
+        <Dialog open={showLowerAbwWarning} onOpenChange={setShowLowerAbwWarning}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-red-600">
+                <AlertCircle className="h-5 w-5" /> Invalid ABW Entry
+              </DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-gray-700">
+              The entered Average Body Weight is lower than the previously
+              recorded value ({lastABW}g). Please double-check your measurement
+              before proceeding.
+            </p>
+            <div className="flex justify-end gap-2 mt-4">
+              <Button
+                variant="outline"
+                onClick={() => setShowLowerAbwWarning(false)}
+              >
+                OK
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* ⚠️ Warning: Invalid Target */}
+        <Dialog
+          open={showInvalidTargetWarning}
+          onOpenChange={setShowInvalidTargetWarning}
+        >
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-red-600">
+                <AlertCircle className="h-5 w-5" /> Invalid Target Weight
+              </DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-gray-700">
+              The target weight must be greater than the current ABW. Please
+              enter a higher target weight to continue.
+            </p>
+            <div className="flex justify-end gap-2 mt-4">
+              <Button
+                variant="outline"
+                onClick={() => setShowInvalidTargetWarning(false)}
+              >
+                OK
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </DialogContent>
     </Dialog>
   )

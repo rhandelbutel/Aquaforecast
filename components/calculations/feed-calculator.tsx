@@ -6,8 +6,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Calculator } from 'lucide-react'
+import { PondData } from '@/lib/pond-service'
 
-export function FeedCalculator() {
+interface FeedCalculatorProps {
+  ponds: PondData[]
+}
+
+export function FeedCalculator({ ponds }: FeedCalculatorProps) {
   const [fishWeight, setFishWeight] = useState('')
   const [fishCount, setFishCount] = useState('')
   const [feedingRate, setFeedingRate] = useState('3')
