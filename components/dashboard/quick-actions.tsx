@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -18,6 +18,7 @@ import { subscribeMortalityLogs, type MortalityLog } from "@/lib/mortality-servi
 import { GrowthService } from "@/lib/growth-service"
 import { useAuth } from "@/lib/auth-context"
 import { subscribeUserProfile } from "@/lib/user-service"
+import { subscribeFeedingLogs, type FeedingLog } from "@/lib/feeding-service"
 
 interface QuickActionsProps {
   pond: UnifiedPond
@@ -55,6 +56,16 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
     if (!sharedPondId) return
     const unsub = feedingScheduleService.subscribeByPond(sharedPondId, (s) => setSchedule(s))
     return () => { try { unsub?.() } catch {} }
+  }, [sharedPondId])
+
+  // ---- Live feeding logs (for hiding due badge) ----
+  const [logs, setLogs] = useState<FeedingLog[]>([])
+  const unsubLogs = useRef<null | (() => void)>(null)
+  useEffect(() => {
+    if (!sharedPondId) return
+    unsubLogs.current?.()
+    unsubLogs.current = subscribeFeedingLogs(sharedPondId, (arr) => setLogs(arr))
+    return () => { unsubLogs.current?.(); unsubLogs.current = null }
   }, [sharedPondId])
 
   // ---- Mortality cadence ----
@@ -131,16 +142,24 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
     return schedule.feedingTimes.some((t) => t === nowHHMM)
   }, [schedule, nowTick])
 
-  // "Due X min" within next 15 min (hidden while feedNow)
+  // "Due X min" within next 15 min — hides if log already exists
   const dueInMin = useMemo(() => {
     if (feedNow) return null
     const now = new Date(nowTick)
     const next = findNextScheduled(schedule, now)
     if (!next) return null
+
+    // Hide badge if a log already exists near that scheduled time
+    const hasLog = logs.some((l) => {
+      const fedAt = new Date(l.fedAt).getTime()
+      return Math.abs(fedAt - next.getTime()) < 15 * 60 * 1000 // ±15 min tolerance
+    })
+    if (hasLog) return null
+
     const ms = next.getTime() - now.getTime()
     const min = Math.ceil(ms / 60000)
     return min > 0 && min <= 15 ? min : null
-  }, [schedule, nowTick, feedNow])
+  }, [schedule, nowTick, feedNow, logs])
 
   const mortalityDue = useMemo(() => {
     if (!lastMortalityDate) return true
@@ -249,8 +268,15 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
       </Card>
 
       {/* Modals */}
-      <FeedingLogModal isOpen={showFeedingModal} onClose={() => setShowFeedingModal(false)} />
-      <FeedingScheduleModal isOpen={showScheduleModal} onClose={() => setShowScheduleModal(false)} pond={pond} />
+      <FeedingLogModal
+        isOpen={showFeedingModal}
+        onClose={() => setShowFeedingModal(false)}
+      />
+      <FeedingScheduleModal
+        isOpen={showScheduleModal}
+        onClose={() => setShowScheduleModal(false)}
+        pond={pond}
+      />
       <MortalityLogModal
         isOpen={showMortalityModal}
         onClose={() => setShowMortalityModal(false)}
@@ -270,8 +296,6 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
         }}
         onSuccess={() => setShowGrowthSetupModal(false)}
       />
-
-      {/* Export Modal */}
       <ExportModal
         open={showExportModal}
         onCloseAction={() => setShowExportModal(false)}
