@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { adminDb } from "@/lib/firebase-admin";
-import { toDate, reminderDocId } from "@/app/api/utils/link-users-to-pond/route";
+import { toDate, reminderDocId } from "@/lib/utils/date-utils";
+
 
 export async function GET() {
   try {
