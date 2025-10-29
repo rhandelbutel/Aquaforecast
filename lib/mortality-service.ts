@@ -1,7 +1,5 @@
-// lib/mortality-service.ts
 import {
   collection,
-  addDoc,
   getDocs,
   getDoc,
   doc,
@@ -11,6 +9,7 @@ import {
   serverTimestamp,
   onSnapshot,
   writeBatch,
+  setDoc,
 } from "firebase/firestore"
 import { db } from "./firebase"
 
@@ -20,52 +19,47 @@ export interface MortalityLog {
   pondName: string
   userId: string
   date: Date
-  /** Mortality as percent for the period (0–100). */
   mortalityRate?: number
-  /** Legacy/back-compat (optional) */
   deadFishCount?: number
   notes?: string
   createdAt: Date
 }
 
-/* ------------ Core CRUD helpers ------------ */
+/* ------------ Core CRUD helpers (update-only mode) ------------ */
 
-export const addMortalityLog = async (
+/**
+ * Update (or create if missing) a mortality log for a pond.
+ * This ensures only one doc per pond.
+ */
+export const updateMortalityLog = async (
   mortalityData: Omit<MortalityLog, "id" | "createdAt">
 ) => {
   try {
-    const { notes, ...rest } = mortalityData
-    const payload = {
-      ...rest,
-      ...(notes ? { notes } : {}),
-      createdAt: serverTimestamp(),
+    // Find existing doc for this pond
+    const q = query(collection(db, "mortality-logs"), where("pondId", "==", mortalityData.pondId))
+    const qs = await getDocs(q)
+
+    if (!qs.empty) {
+      // Update the existing log
+      const ref = qs.docs[0].ref
+      await updateDoc(ref, {
+        ...mortalityData,
+        updatedAt: serverTimestamp(),
+      })
+      return ref.id
+    } else {
+      // (Optional fallback: create one if none exists)
+      const ref = doc(collection(db, "mortality-logs"))
+      await setDoc(ref, {
+        ...mortalityData,
+        createdAt: serverTimestamp(),
+      })
+      return ref.id
     }
-    const docRef = await addDoc(collection(db, "mortality-logs"), payload)
-    return docRef.id
   } catch (error) {
-    console.error("Error adding mortality log:", error)
+    console.error("Error updating mortality log:", error)
     throw error
   }
-}
-
-/** Still exported for back-compat in other screens; not used by the new modal. */
-export const updateMortalityLogRate = async (
-  pondId: string,
-  logId: string,
-  mortalityRate: number
-): Promise<void> => {
-  const rate = Number(mortalityRate)
-  if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
-    throw new Error("mortalityRate must be between 0 and 100")
-  }
-
-  const ref = doc(db, "mortality-logs", logId)
-  const snap = await getDoc(ref)
-  if (!snap.exists()) throw new Error("Mortality log not found")
-  const data = snap.data() as any
-  if (data?.pondId !== pondId) throw new Error("Log does not belong to the specified pond")
-
-  await updateDoc(ref, { mortalityRate: rate })
 }
 
 export const getMortalityLogs = async (pondId: string): Promise<MortalityLog[]> => {
@@ -99,7 +93,7 @@ export const getMortalityLogs = async (pondId: string): Promise<MortalityLog[]> 
       } as MortalityLog
     })
 
-    return logs.sort((a, b) => (b.date?.getTime?.() ?? 0) - (a.date?.getTime?.() ?? 0))
+    return logs
   } catch (error) {
     console.error("Error getting mortality logs:", error)
     return []
@@ -137,7 +131,6 @@ export const subscribeMortalityLogs = (
         createdAt: toSafeDate(data.createdAt),
       } as MortalityLog
     })
-    logs.sort((a, b) => (b.date?.getTime?.() ?? 0) - (a.date?.getTime?.() ?? 0))
     callback(logs)
   })
 }
@@ -150,52 +143,9 @@ export const computeSurvivalRateFromLogs = (logs: MortalityLog[], initialRate = 
   return Math.max(0, initialRate - totalMortality)
 }
 
-export const resetMortalityLogs = async (pondId: string): Promise<void> => {
-  try {
-    const q = query(collection(db, "mortality-logs"), where("pondId", "==", pondId))
-    const qs = await getDocs(q)
-    if (qs.empty) return
-    let batch = writeBatch(db)
-    let opCount = 0
-    for (const d of qs.docs) {
-      batch.delete(d.ref)
-      opCount++
-      if (opCount === 450) {
-        await batch.commit()
-        batch = writeBatch(db)
-        opCount = 0
-      }
-    }
-    if (opCount > 0) await batch.commit()
-  } catch (error) {
-    console.error("Error resetting mortality logs:", error)
-    throw error
-  }
-}
+/* ------------ Simplified update-only API ------------ */
 
-/* ------------ 15-day cadence utilities (independent of ABW) ------------ */
-
-const DAY_MS = 86_400_000
-const CADENCE_DAYS = 15
-
-export function canCreateMortalityNow(lastLogDate: Date | null | undefined): boolean {
-  if (!lastLogDate) return true
-  const days = Math.floor((Date.now() - lastLogDate.getTime()) / DAY_MS)
-  return days >= CADENCE_DAYS
-}
-
-export function daysUntilNextMortality(lastLogDate: Date | null | undefined): number {
-  if (!lastLogDate) return 0
-  const days = Math.floor((Date.now() - lastLogDate.getTime()) / DAY_MS)
-  return Math.max(0, CADENCE_DAYS - days)
-}
-
-/**
- * Create a **new** mortality doc (for the next 15-day period) ensuring:
- *  - rate > 0 and ≤ 100
- *  - cumulative mortality stays ≤ 100 (so survival never increases)
- */
-export async function createMortalityLogMonotonic(params: {
+export async function saveMortalityLog(params: {
   pondId: string
   pondName: string
   userId: string
@@ -207,21 +157,8 @@ export async function createMortalityLogMonotonic(params: {
     throw new Error("mortalityRate must be > 0 and ≤ 100")
   }
 
-  const logs = await getMortalityLogs(params.pondId)
-  const lastDate = logs[0]?.date ?? null
-  if (!canCreateMortalityNow(lastDate)) {
-    throw new Error(`Not due yet. Next entry allowed in ${daysUntilNextMortality(lastDate)} day(s).`)
-  }
-
-  const prevTotal = logs.reduce(
-    (sum, l) => sum + (typeof l.mortalityRate === "number" ? Math.max(0, Math.min(100, l.mortalityRate)) : 0),
-    0
-  )
-  if (prevTotal + rate > 100) {
-    throw new Error(`Cumulative mortality would exceed 100% (current ${prevTotal}%, +${rate}%).`)
-  }
-
-  return await addMortalityLog({
+  // Simply update (or create once)
+  return await updateMortalityLog({
     pondId: params.pondId,
     pondName: params.pondName,
     userId: params.userId,

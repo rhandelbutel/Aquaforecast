@@ -1,6 +1,6 @@
+// components/mortality/mortality-log-modal.tsx
 "use client"
-
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -12,9 +12,7 @@ import { useAuth } from "@/lib/auth-context"
 import {
   getMortalityLogs,
   computeSurvivalRateFromLogs,
-  createMortalityLogMonotonic,
-  canCreateMortalityNow,
-  daysUntilNextMortality,
+  saveMortalityLog,
   type MortalityLog,
 } from "@/lib/mortality-service"
 import type { UnifiedPond } from "@/lib/pond-context"
@@ -59,7 +57,7 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
         const latest = l[0] ?? null
         setLastLogDate(latest?.date ?? null)
 
-        setDateStr(toYMD(new Date())) 
+        setDateStr(toYMD(new Date()))
         setRateStr("")
         setError("")
         setSuccess("")
@@ -76,9 +74,6 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
   const survivalPct = computeSurvivalRateFromLogs(logs)
   const estimatedAlive = Math.max(0, Math.round((survivalPct / 100) * initialFishCount))
 
-  const isDue = canCreateMortalityNow(lastLogDate)
-  const daysLeft = daysUntilNextMortality(lastLogDate)
-
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!user || !sharedPondId) return
@@ -88,35 +83,31 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
       setError("Enter a valid mortality rate (> 0 and ≤ 100).")
       return
     }
-    if (!isDue) {
-      setError(`Not due yet. You can record again in ${daysLeft} day(s).`)
-      return
-    }
 
     setSaving(true)
     setError("")
     setSuccess("")
     try {
-      await createMortalityLogMonotonic({
+      await saveMortalityLog({
         pondId: sharedPondId,
         pondName: pond.name,
         userId: user.uid,
-        date: new Date(), // today only (no edit)
+        date: new Date(), // always today
         mortalityRate: rate,
       })
 
-      // refresh
+      // refresh logs after update
       const l = await getMortalityLogs(sharedPondId)
       setLogs(l)
       const latest = l[0] ?? null
       setLastLogDate(latest?.date ?? null)
 
       setRateStr("")
-      setSuccess("Mortality recorded for this 15-day period.")
+      setSuccess("Mortality log updated successfully.")
       onSuccess?.()
     } catch (err: any) {
       console.error(err)
-      setError(err?.message || "Failed to save mortality. Please try again.")
+      setError(err?.message || "Failed to update mortality. Please try again.")
     } finally {
       setSaving(false)
     }
@@ -138,12 +129,10 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
         </CardHeader>
 
         <CardContent className="space-y-6">
-          {/* Cadence banner */}
-          <div className={`text-xs flex items-center gap-2 ${isDue ? "text-indigo-700" : "text-yellow-700"}`}>
+          {/* Info banner */}
+          <div className="text-xs flex items-center gap-2 text-indigo-700">
             <AlertCircle className="h-4 w-4" />
-            {isDue
-              ? "New 15-day period: you can record a new mortality rate now."
-              : `Next entry allowed in ${daysLeft} day(s).`}
+            Updating mortality data for this pond.
           </div>
 
           {/* Top metrics */}
@@ -162,13 +151,13 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
               <div className="text-2xl font-bold text-gray-700">
                 {lastLogDate ? toYMD(lastLogDate) : "—"}
               </div>
-              <div className="text-sm text-gray-600">Last Mortality Entry</div>
+              <div className="text-sm text-gray-600">Last Mortality Update</div>
             </div>
           </div>
 
-          {/* Create-only form */}
+          {/* Update form */}
           <form onSubmit={handleSave} className="space-y-4 border-t pt-4">
-            <h3 className="text-lg font-semibold">Record Mortality (every 15 days)</h3>
+            <h3 className="text-lg font-semibold">Update Mortality Log</h3>
 
             {error && (
               <Alert variant="destructive">
@@ -190,7 +179,9 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
                   <Input type="date" value={dateStr} disabled />
                   <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
                 </div>
-                <p className="text-xs text-gray-500">Date is fixed to today. Entries are allowed once every 15 days.</p>
+                <p className="text-xs text-gray-500">
+                  Date is fixed to today. You can update this record anytime.
+                </p>
               </div>
 
               <div className="space-y-2">
@@ -210,11 +201,21 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
             </div>
 
             <div className="flex gap-3 pt-4">
-              <Button type="button" variant="outline" className="flex-1 bg-transparent" onClick={onClose} disabled={loading || saving}>
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1 bg-transparent"
+                onClick={onClose}
+                disabled={loading || saving}
+              >
                 Cancel
               </Button>
-              <Button type="submit" className="flex-1 bg-red-600 hover:bg-red-700" disabled={loading || saving || !isDue}>
-                {saving ? "Saving..." : "Save (New Period)"}
+              <Button
+                type="submit"
+                className="flex-1 bg-red-600 hover:bg-red-700"
+                disabled={loading || saving}
+              >
+                {saving ? "Saving..." : "Save Update"}
               </Button>
             </div>
           </form>
