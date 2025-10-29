@@ -264,7 +264,7 @@ export function HarvestPredictionDashboard({
               <div className="flex items-center">
                 <TrendingUp className="h-5 w-5 text-green-600 mr-2" />
                 <div>
-                  <p className="text-sm text-gray-600">Current ABW</p>
+                  <p className="text-sm text-gray-600">Latest ABW Update</p>
                   <p className="text-xl font-bold">
                     {currentABW !== null ? `${currentABW}g` : "Not set"}
                   </p>
