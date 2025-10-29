@@ -209,7 +209,7 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
               <span className="text-sm">Growth Setup</span>
               {growthDue && (
                 <span className="absolute -top-2 -right-2 rounded-full bg-indigo-600 text-white text-[10px] px-2 py-0.5 shadow">
-                  Due
+                  Set Update
                 </span>
               )}
             </Button>
