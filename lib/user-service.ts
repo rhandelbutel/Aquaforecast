@@ -23,6 +23,7 @@ export interface UserProfile {
   displayName: string;
   fullName?: string;
   phone?: string;
+  phoneNumbers?: string[] 
   status: "pending" | "approved" | "rejected" | "blocked";
   createdAt?: Date | undefined;
   approvedAt?: Date | undefined;
@@ -50,8 +51,12 @@ export interface PondPreferences {
 
 // allow null for fullName/phone so UI can clear them safely
 export type UpdatableProfile =
-  { fullName?: string | null; phone?: string | null } &
-  Partial<Omit<UserProfile, "uid" | "createdAt" | "fullName" | "phone">>;
+  {
+    fullName?: string | null
+    phone?: string | null
+    phoneNumbers?: string[] | null   // ✅ add this
+  } & Partial<Omit<UserProfile, "uid" | "createdAt" | "fullName" | "phone" | "phoneNumbers">>;
+
 
 // ---------- Admin email check ----------
 export function isAdmin(email: string): boolean {
@@ -83,14 +88,28 @@ function normalizeStudentId(id: string): string {
 }
 
 // ---------- Converters ----------
+// ---------- Converters ----------
 function convertToUserProfile(docSnap: any): UserProfile {
-  const data = docSnap.data() || {};
+  const data = docSnap.data() || {}
+
+  // Normalize the array safely
+  const phoneNumbers: string[] = Array.isArray(data.phoneNumbers)
+    ? (data.phoneNumbers as string[]).filter((s) => typeof s === "string" && s.trim().length > 0)
+    : []
+
+  // Legacy bridge: if phone is absent but array has values, use the first one
+  const phone: string | undefined =
+    typeof data.phone === "string" && data.phone.trim().length > 0
+      ? data.phone
+      : phoneNumbers[0] ?? undefined
+
   return {
     uid: docSnap.id,
     email: (data.email || "").toLowerCase(),
     displayName: data.displayName || "",
     fullName: data.fullName || undefined,
-    phone: data.phone || undefined,
+    phone,                       // ✅ now derived from array if needed
+    phoneNumbers,                // ✅ expose the array to the UI
     status: (data.status as UserProfile["status"]) || "pending",
     createdAt: safeToDate(data.createdAt),
     approvedAt: data.approvedAt ? safeToDate(data.approvedAt) : undefined,
@@ -100,11 +119,11 @@ function convertToUserProfile(docSnap: any): UserProfile {
     blockedAt: data.blockedAt ? safeToDate(data.blockedAt) : undefined,
     blockedBy: data.blockedBy || undefined,
     blockReason: data.blockReason ?? null,
-    studentId:
-      typeof data.studentId === "string" ? data.studentId : undefined,
+    studentId: typeof data.studentId === "string" ? data.studentId : undefined,
     role: (data.role as UserProfile["role"]) ?? "user",
-  };
+  }
 }
+
 
 // ========== CREATE / READ / UPDATE ==========
 export async function createUserProfile(
