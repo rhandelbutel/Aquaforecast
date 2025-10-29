@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { Scale, Target, AlertCircle, ChevronDown } from "lucide-react"
+import { Scale, Target, AlertCircle, ChevronDown, Calculator } from "lucide-react"
 import { GrowthService, type GrowthSetup, type GrowthHistory } from "@/lib/growth-service"
 import { useAuth } from "@/lib/auth-context"
 import { useToast } from "@/hooks/use-toast"
@@ -47,6 +47,11 @@ export function GrowthSetupModal({
   // 🚨 New restriction dialog states
   const [showLowerAbwWarning, setShowLowerAbwWarning] = useState(false)
   const [showInvalidTargetWarning, setShowInvalidTargetWarning] = useState(false)
+
+  // 🧮 ABW Calculator states
+  const [sampleCount, setSampleCount] = useState<number>(0)
+  const [totalWeight, setTotalWeight] = useState<number>(0)
+  const [computedABW, setComputedABW] = useState<number | null>(null)
 
   const sharedPondId = pond.adminPondId || pond.id
 
@@ -179,19 +184,16 @@ export function GrowthSetupModal({
       return
     }
 
-    // ✅ NEW: Restrict lower ABW input than previous (with popup)
     if (lastABW !== null && abw < lastABW) {
       setShowLowerAbwWarning(true)
       return
     }
 
-    // ✅ NEW: Restrict invalid target weight (with popup)
     if (!isNaN(target) && target > 0 && target <= abw) {
       setShowInvalidTargetWarning(true)
       return
     }
 
-    // only target change while ABW is locked by cadence rule
     if (
       existingSetup &&
       !GrowthService.canUpdateABW(existingSetup.lastABWUpdate) &&
@@ -211,7 +213,6 @@ export function GrowthSetupModal({
       return
     }
 
-    // cadence restriction
     if (existingSetup && !GrowthService.canUpdateABW(existingSetup.lastABWUpdate)) {
       toast({
         title: "Error",
@@ -303,6 +304,64 @@ export function GrowthSetupModal({
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
+          {/* 🧮 ABW Calculator */}
+          <div className="rounded-md border p-3 bg-gray-50">
+            <div className="flex items-center gap-2 mb-2">
+              <Calculator className="h-4 w-4 text-blue-600" />
+              <p className="font-medium text-sm">ABW Calculator</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label htmlFor="sampleCount">No. of Fish Sampled</Label>
+                <Input
+                  id="sampleCount"
+                  type="number"
+                  min="1"
+                  placeholder="e.g. 10"
+                  onChange={(e) => setSampleCount(parseFloat(e.target.value))}
+                  value={sampleCount || ""}
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="totalWeight">Total Sample Weight (g)</Label>
+                <Input
+                  id="totalWeight"
+                  type="number"
+                  min="1"
+                  step="0.01"
+                  placeholder="e.g. 420"
+                  onChange={(e) => setTotalWeight(parseFloat(e.target.value))}
+                  value={totalWeight || ""}
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between mt-3">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  if (sampleCount > 0 && totalWeight > 0) {
+                    const calc = Number((totalWeight / sampleCount).toFixed(2))
+                    setComputedABW(calc)
+                    setCurrentABW(calc.toString())
+                  }
+                }}
+              >
+                Compute ABW
+              </Button>
+
+              {computedABW !== null && (
+                <p className="text-sm text-gray-600">
+                  Result: <span className="font-semibold">{computedABW} g/fish</span>
+                </p>
+              )}
+            </div>
+          </div>
+
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="currentABW" className="flex items-center gap-2">
