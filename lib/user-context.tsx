@@ -1,3 +1,4 @@
+// lib/user-context.tsx
 "use client"
 
 import type React from "react"
@@ -9,29 +10,27 @@ import {
   checkUserProfileExists,
   isAdmin,
   getPondPreferences,
-  subscribeUserProfile,   // realtime
+  subscribeUserProfile, // realtime
   type UserProfile,
   type PondPreferences,
 } from "./user-service"
 
-interface UserContextType {
+export interface UserContextType {
   userProfile: UserProfile | null
   preferences: PondPreferences | null
   loading: boolean
   error: string | null
-  refreshProfile: () => Promise<void>        // kept for compatibility
+  refreshProfile: () => Promise<void>
   refreshPreferences: () => Promise<void>
   checkUserExists: (uid: string) => Promise<boolean>
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined)
 
-export function useUser() {
-  const context = useContext(UserContext)
-  if (context === undefined) {
-    throw new Error("useUser must be used within a UserProvider")
-  }
-  return context
+export function useUser(): UserContextType {
+  const ctx = useContext(UserContext)
+  if (!ctx) throw new Error("useUser must be used within a UserProvider")
+  return ctx
 }
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
@@ -42,7 +41,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  //  Realtime: ensure doc exists, then subscribe to it
+  // ---- Realtime profile subscription (and bootstrap on first login) ----
   useEffect(() => {
     setError(null)
 
@@ -59,22 +58,24 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       try {
         setLoading(true)
 
-        // Ensure a profile doc exists (first-login case)
+        // Ensure the profile doc exists (first-time login)
         const existing = await getUserProfile(user.uid)
         if (!existing) {
-          const inferredRole: UserProfile["role"] = user.email && isAdmin(user.email) ? "admin" : "user"
+          const role: UserProfile["role"] =
+            user.email && isAdmin(user.email) ? "admin" : "user"
           await createUserProfile(user.uid, {
             email: user.email || "",
-            displayName: user.displayName || user.email?.split("@")[0] || "",
-            status: inferredRole === "admin" ? "approved" : "pending",
-            role: inferredRole,
-            createdAt: new Date(), // will be overwritten by serverTimestamp in service
+            displayName:
+              user.displayName || user.email?.split("@")[0] || "",
+            status: role === "admin" ? "approved" : "pending",
+            role,
+            createdAt: new Date(), // serverTimestamp will overwrite in service
           } as Omit<UserProfile, "uid">)
         }
 
         if (cancelled) return
 
-        // Subscribe to live changes
+        // Subscribe to live updates of the profile
         unsub = subscribeUserProfile(
           user.uid,
           (profile) => {
@@ -98,27 +99,26 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       cancelled = true
       if (unsub) unsub()
     }
-  }, [user?.uid])
+    // Only user.uid & user.email affect bootstrap role and doc path
+  }, [user?.uid, user?.email])
 
-  // Legacy manual refresh (not needed with realtime, but kept so callers don’t break)
+  // ---- Manual refresh (kept for compatibility; snapshot already updates UI) ----
   const refreshProfile = async () => {
     if (!user?.uid) {
       setUserProfile(null)
       return
     }
     try {
-      setLoading(true)
       setError(null)
       const profile = await getUserProfile(user.uid)
       setUserProfile(profile)
     } catch (e) {
       console.error("refreshProfile error:", e)
       setError("Failed to refresh profile.")
-    } finally {
-      setLoading(false)
     }
   }
 
+  // ---- Preferences (one-shot; can be made realtime later) ----
   const refreshPreferences = async () => {
     if (!user?.uid) {
       setPreferences(null)
@@ -129,9 +129,15 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       setPreferences(prefs)
     } catch (e) {
       console.error("Error refreshing preferences:", e)
-      // optional: setError("Failed to load preferences.")
+      // optional: surface an error if needed
     }
   }
+
+  // Load preferences when user changes
+  useEffect(() => {
+    if (user?.uid) void refreshPreferences()
+    else setPreferences(null)
+  }, [user?.uid])
 
   const checkUserExists = async (uid: string): Promise<boolean> => {
     try {
@@ -142,21 +148,22 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  // Load preferences when user changes (one-shot; make this a subscription later if you need live prefs)
-  useEffect(() => {
-    if (user) void refreshPreferences()
-    else setPreferences(null)
-  }, [user?.uid])
-
-  const value = useMemo<UserContextType>(() => ({
-    userProfile,
-    preferences,
-    loading,
-    error,
-    refreshProfile,
-    refreshPreferences,
-    checkUserExists,
-  }), [userProfile, preferences, loading, error])
+  const value = useMemo<UserContextType>(
+    () => ({
+      userProfile,
+      preferences,
+      loading,
+      error,
+      refreshProfile,
+      refreshPreferences,
+      checkUserExists,
+    }),
+    [userProfile, preferences, loading, error]
+  )
 
   return <UserContext.Provider value={value}>{children}</UserContext.Provider>
 }
+
+// Explicit named exports to avoid resolution issues in TS/Next caches
+export { UserContext }
+export type { UserProfile, PondPreferences }
