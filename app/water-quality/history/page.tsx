@@ -8,8 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select'
 import { ArrowLeft } from 'lucide-react'
 import {
-  BarChart,
-  Bar,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -85,6 +85,21 @@ function sliceFortnight<T>(rows: T[], fortnightIndex1: number, size = FORTNIGHT_
   const end = Math.min(start + size, rows.length)
   return rows.slice(start, end)
 }
+
+// Split an array into consecutive 14-day "fortnight" chunks
+function chunkFortnights<T>(rows: T[], size = FORTNIGHT_SIZE) {
+  const out: T[][] = []
+  for (let i = 0; i < rows.length; i += size) {
+    out.push(rows.slice(i, i + size))
+  }
+  return out
+}
+
+// Nice distinct colors for multiple compare lines
+const FORTNIGHT_COLORS = [
+  '#2563eb', '#16a34a', '#9333ea', '#f59e0b', '#ef4444', '#0ea5e9',
+  '#10b981', '#8b5cf6', '#f97316', '#dc2626', '#22c55e', '#3b82f6'
+]
 
 // ---------- tiny hook to detect desktop (md: 768px) ----------
 function useIsDesktop(breakpoint = 768) {
@@ -196,7 +211,10 @@ export default function WaterQualityHistoryPage() {
       return next
     })
 
-  // value label — shows "null" on missing values
+  // ===== Compare modal state =====
+  const [compareOpen, setCompareOpen] = useState(false)
+
+  // value label — shows "null" on missing values (for line points)
   const makeValueLabel =
     (field: 'pH' | 'temp' | 'do', unit: string) =>
     (props: any) => {
@@ -204,7 +222,7 @@ export default function WaterQualityHistoryPage() {
       const display =
         v == null ? 'null' : unit ? `${Number(v).toFixed(2)} ${unit}` : Number(v).toFixed(2)
       return (
-        <text x={props.x} y={props.y - 6} textAnchor="middle" fontSize={12} fill="#555">
+        <text x={props.x} y={props.y - 8} textAnchor="middle" fontSize={12} fill="#555">
           {display}
         </text>
       )
@@ -299,7 +317,7 @@ export default function WaterQualityHistoryPage() {
           {showTitle && <div className="text-base font-semibold mb-2">{label}</div>}
           <div className="h-[360px]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data} margin={{ top: 24, right: 28, left: 28, bottom: 60 }}>
+              <LineChart data={data} margin={{ top: 24, right: 28, left: 28, bottom: 60 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis
                   dataKey="date"
@@ -316,17 +334,26 @@ export default function WaterQualityHistoryPage() {
                     label,
                   ]}
                 />
-                <Bar dataKey={field as any} fill={color}>
+                <Line
+                  type="monotone"
+                  dataKey={field as any}
+                  stroke={color}
+                  strokeWidth={2}
+                  dot={{ r: 2 }}
+                  activeDot={{ r: 5 }}
+                  connectNulls
+                  isAnimationActive={false}
+                >
                   <LabelList dataKey={field as any} content={<ValueLabel />} />
-                </Bar>
-              </BarChart>
+                </Line>
+              </LineChart>
             </ResponsiveContainer>
           </div>
         </div>
       )
     }
 
-    // MOBILE: horizontal scroll with virtual width + thicker bars
+    // MOBILE: horizontal scroll with virtual width
     const perDay = 64 // adjust density on mobile (48..80)
     const minWidth = 640
     const chartWidth = Math.max(minWidth, data.length * perDay)
@@ -337,7 +364,7 @@ export default function WaterQualityHistoryPage() {
         {showTitle && <div className="text-base font-semibold mb-2">{label}</div>}
         <div className="w-full overflow-x-auto">
           <div style={{ width: chartWidth }}>
-            <BarChart
+            <LineChart
               width={chartWidth}
               height={chartHeight}
               data={data}
@@ -359,15 +386,41 @@ export default function WaterQualityHistoryPage() {
                   label,
                 ]}
               />
-              <Bar dataKey={field as any} fill={color} barSize={32}>
+              <Line
+                type="monotone"
+                dataKey={field as any}
+                stroke={color}
+                strokeWidth={2}
+                dot={{ r: 2 }}
+                activeDot={{ r: 5 }}
+                connectNulls
+                isAnimationActive={false}
+              >
                 <LabelList dataKey={field as any} content={<ValueLabel />} />
-              </Bar>
-            </BarChart>
+              </Line>
+            </LineChart>
           </div>
         </div>
       </div>
     )
   }
+
+  // ===== Compare data for the currently selected param (all fortnights) =====
+  const compareFortnightSeries = useMemo(() => {
+    if (!dataAll.length) return []
+    const field = selectedParam.field as 'pH' | 'temp' | 'do'
+    const chunks = chunkFortnights(dataAll, FORTNIGHT_SIZE) // [[..14..], [..14..], ...]
+    // For alignment, use Day 1..Day 14 per chunk
+    return chunks.map((chunk, idx) => {
+      const label = `Fortnight ${idx + 1}`
+      const rows = chunk.map((r, dayIdx) => ({
+        day: `Day ${dayIdx + 1}`,
+        dateLabel: r.date,             // keep original date label for tooltip
+        value: (r as any)[field] ?? null,
+      }))
+      return { label, rows }
+    })
+  }, [dataAll, selectedParam])
 
   return (
     <div className="p-4 md:p-6 space-y-6">
@@ -389,14 +442,16 @@ export default function WaterQualityHistoryPage() {
 
         <h1 className="text-2xl md:text-3xl font-semibold text-center">Daily Trends</h1>
 
-        <Button
-          onClick={() => setExportOpen(true)}
-          size="sm"
-          className="justify-self-end whitespace-nowrap bg-white text-gray-900 border border-gray-200 hover:bg-gray-50 shadow-sm md:text-sm text-xs"
-        >
-          <span className="hidden md:inline">Export Trends</span>
-          <span className="md:hidden">Export</span>
-        </Button>
+        <div className="justify-self-end flex items-center gap-2">
+          <Button
+            onClick={() => setExportOpen(true)}
+            size="sm"
+            className="whitespace-nowrap bg-white text-gray-900 border border-gray-200 hover:bg-gray-50 shadow-sm md:text-sm text-xs"
+          >
+            <span className="hidden md:inline">Export Trends</span>
+            <span className="md:hidden">Export</span>
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -456,6 +511,15 @@ export default function WaterQualityHistoryPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            {/* New: Compare All Fortnights button */}
+            <Button
+              variant="outline"
+              className="whitespace-nowrap"
+              onClick={() => setCompareOpen(true)}
+            >
+              Compare all fortnights
+            </Button>
           </div>
         </CardHeader>
 
@@ -484,9 +548,9 @@ export default function WaterQualityHistoryPage() {
             <DialogTitle>Export Trends</DialogTitle>
           </DialogHeader>
 
-        <div className="space-y-4">
+          <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Pick which sensor charts to include in the PDF. Bars will show their values (or “null” if no data).
+              Pick which sensor charts to include in the PDF. Values will be shown on each point (or “null” if no data).
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -552,6 +616,81 @@ export default function WaterQualityHistoryPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ===== Compare Modal: one line per fortnight for the selected sensor ===== */}
+      <Dialog open={compareOpen} onOpenChange={setCompareOpen}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>
+              Compare All Fortnights — {selectedParam.label}
+            </DialogTitle>
+          </DialogHeader>
+
+          {compareFortnightSeries.length <= 1 ? (
+            <div className="text-sm text-muted-foreground">
+              Not enough data yet to compare across fortnights.
+            </div>
+          ) : (
+            <div className="w-full h-[420px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart
+                  data={
+                    // Merge rows by day index to plot N lines on the same X (Day 1..14)
+                    // table: [{day, F1, F2, ... , F1_date, F2_date, ...}, ...]
+                    (() => {
+                      const maxDays = FORTNIGHT_SIZE
+                      const table: any[] = []
+                      for (let d = 0; d < maxDays; d++) {
+                        const row: any = { day: `Day ${d + 1}` }
+                        compareFortnightSeries.forEach((series, i) => {
+                          row[`F${i + 1}`] = series.rows[d]?.value ?? null
+                          row[`F${i + 1}_date`] = series.rows[d]?.dateLabel ?? ''
+                        })
+                        table.push(row)
+                      }
+                      return table
+                    })()
+                  }
+                  margin={{ top: 16, right: 24, left: 8, bottom: 40 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="day" interval={0} angle={-15} textAnchor="end" height={36} />
+                  <YAxis />
+                  <Tooltip
+                    formatter={(value: any, name: string, ctx: any) => {
+                      if (value == null) return ['No data', name]
+                      const unit = selectedParam.unit
+                      const display = unit ? `${Number(value).toFixed(2)} ${unit}` : Number(value).toFixed(2)
+                      const k = name.replace(/\s*\(.*\)\s*/,'') // 'F1', 'F2'...
+                      const dateKey = `${k}_date`
+                      const date = ctx && ctx.payload ? ctx.payload[dateKey] : ''
+                      return [display, `${name}${date ? ` — ${date}` : ''}`]
+                    }}
+                  />
+                  {compareFortnightSeries.map((series, i) => (
+                    <Line
+                      key={series.label}
+                      type="monotone"
+                      dataKey={`F${i + 1}`}
+                      name={`${series.label}`}
+                      stroke={FORTNIGHT_COLORS[i % FORTNIGHT_COLORS.length]}
+                      strokeWidth={2}
+                      dot={{ r: 2 }}
+                      activeDot={{ r: 5 }}
+                      connectNulls
+                      isAnimationActive={false}
+                    />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setCompareOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -577,7 +716,7 @@ function ExportChart({
       const display =
         v == null ? 'null' : unitInner ? `${Number(v).toFixed(2)} ${unitInner}` : Number(v).toFixed(2)
       return (
-        <text x={props.x} y={props.y - 6} textAnchor="middle" fontSize={12} fill="#555">
+        <text x={props.x} y={props.y - 8} textAnchor="middle" fontSize={12} fill="#555">
           {display}
         </text>
       )
@@ -586,7 +725,7 @@ function ExportChart({
   return (
     <div className="w-full">
       <div className="text-base font-semibold mb-2">{label}</div>
-      <BarChart width={1200} height={448} data={data} margin={{ top: 24, right: 28, left: 28, bottom: 60 }}>
+      <LineChart width={1200} height={448} data={data} margin={{ top: 24, right: 28, left: 28, bottom: 60 }}>
         <CartesianGrid strokeDasharray="3 3" />
         <XAxis dataKey="date" interval={0} angle={-45} textAnchor="end" height={50} tick={{ fontSize: 12 }} />
         <YAxis />
@@ -596,10 +735,19 @@ function ExportChart({
             label,
           ]}
         />
-        <Bar dataKey={field as any} fill={color} barSize={32}>
+        <Line
+          type="monotone"
+          dataKey={field as any}
+          stroke={color}
+          strokeWidth={2}
+          dot={{ r: 2 }}
+          activeDot={{ r: 5 }}
+          connectNulls
+          isAnimationActive={false}
+        >
           <LabelList dataKey={field as any} content={<ValueLabel />} />
-        </Bar>
-      </BarChart>
+        </Line>
+      </LineChart>
     </div>
   )
 }
