@@ -87,12 +87,40 @@ function computeSurvivalRiskMultiplier(
   temp: number | null
 ): number {
   if (ph == null || do_ == null || temp == null) return 1.0
+
+  // Helper to clamp values
+  const clamp = (val: number, min: number, max: number) =>
+    Math.max(min, Math.min(max, val))
+
   let risk = 1.0
-  if (ph < 6.5 || ph > 9) risk *= 0.9
-  if (do_ < 3) risk *= 0.8
-  if (temp < 28 || temp > 31) risk *= 0.9
-  return risk
+
+  // --- pH influence (ideal: 6.5–9) ---
+  if (ph < 6.5 || ph > 9) {
+    // distance from nearest bound (max 2.0 difference fully penalized)
+    const diff = ph < 6.5 ? 6.5 - ph : ph - 9
+    const penalty = clamp(diff / 2, 0, 1) * 0.4 // up to -40%
+    risk *= 1 - penalty
+  }
+
+  // --- DO influence (ideal: 3–5) ---
+  if (do_ < 3 || do_ > 5) {
+    // DO below 3 or above 5 is critical (up to -60%)
+    const diff = do_ < 3 ? 3 - do_ : do_ - 5
+    const penalty = clamp(diff / 2, 0, 1) * 0.6 // up to -60%
+    risk *= 1 - penalty
+  }
+
+  // --- Temperature influence (ideal: 28–31°C) ---
+  if (temp < 28 || temp > 31) {
+    const diff = temp < 28 ? 28 - temp : temp - 31
+    const penalty = clamp(diff / 5, 0, 1) * 0.3 // up to -30%
+    risk *= 1 - penalty
+  }
+
+  // Prevent multiplier from going below 0.1 (total collapse)
+  return clamp(risk, 0.1, 1.0)
 }
+
 
 /* ---------------------------------------------------
    Core dynamic forecast generator
@@ -273,37 +301,44 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
     return rows
   }, [hasHistory, actualSeries, predictedSeries, liveForecastSeries])
 
-  /* --------------------------------------------
-     SURVIVAL curve (historical + forecast)
-     -------------------------------------------- */
+
     /* --------------------------------------------
      SURVIVAL curve (historical + live forecast)
      -------------------------------------------- */
-  const survivalCurveData = useMemo(() => {
-    if (mortLogs.length === 0)
-      return [{ label: "No Data", survival: 100 }]
+const survivalCurveData = useMemo(() => {
+  if (mortLogs.length === 0)
+    return [{ label: "No Data", survival: 100 }]
 
-    const chrono = [...mortLogs].sort(
-      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
-    )
+  const chrono = [...mortLogs].sort(
+    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+  )
 
-    const rows: { label: string; survival: number }[] = []
-    let cumulative = 0
-    for (const log of chrono) {
-      const add = log.mortalityRate
-        ? Math.max(0, Math.min(100, log.mortalityRate))
-        : 0
-      cumulative = Math.min(100, cumulative + add)
-      const survival = Math.max(0, 100 - cumulative)
-      const d = new Date(log.date)
-      const label = d.toLocaleDateString(undefined, {
+  const rows: { label: string; survival: number }[] = []
+  let cumulative = 0
+  for (const log of chrono) {
+    const add = log.mortalityRate
+      ? Math.max(0, Math.min(100, log.mortalityRate))
+      : 0
+    cumulative = Math.min(100, cumulative + add)
+    const survival = Math.max(0, 100 - cumulative)
+    const d = new Date(log.date)
+
+    // --- Updated: make the latest log show "Now" ---
+    let label: string
+    if (log === chrono[chrono.length - 1]) {
+      label = "Now"
+    } else {
+      label = d.toLocaleDateString(undefined, {
         month: "short",
         day: "numeric",
       })
-      rows.push({ label, survival })
     }
-    return rows
-  }, [mortLogs])
+
+    rows.push({ label, survival })
+  }
+  return rows
+}, [mortLogs])
+
 
   const liveSurvivalForecastData = useMemo(() => {
     if (typeof survivalPct !== "number" || survivalCurveData.length === 0)
@@ -391,7 +426,7 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
                 <YAxis />
                 <Tooltip formatter={(v, n) => [`${Number(v).toFixed(2)} g`, n]} />
                 <Line type="monotone" dataKey="actual" stroke="#0891b2" strokeWidth={2.5} name="Actual ABW" dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="predicted" stroke="#059669" strokeWidth={1.5} name="Predicted ABW" dot={{ r: 2 }} />
+                <Line type="monotone" dataKey="predicted" stroke="#059669" strokeWidth={1.5} name="Optimal Growth" dot={{ r: 2 }} />
                 <Line type="monotone" dataKey="liveForecast" stroke="#f59e0b" strokeWidth={1.5} name="Live Growth Forecast" dot={{ r: 2 }} />
               </LineChart>
             </ResponsiveContainer>

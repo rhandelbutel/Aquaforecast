@@ -1,4 +1,4 @@
-//components/feeding/feeding-schedule-modal.tsx
+// components/feeding/feeding-schedule-modal.tsx
 "use client";
 
 import type React from "react";
@@ -9,17 +9,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Calendar, Clock, Repeat, Save, X, UserCircle2, Info, Lock } from "lucide-react";
+import { Calendar, Clock, Repeat, Save, X, UserCircle2, Info, Lock, AlertTriangle } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useUser } from "@/lib/user-context";
 import { usePonds, type UnifiedPond } from "@/lib/pond-context";
-import { useToast } from "@/hooks/use-toast";
 import {
   feedingScheduleService,
   type CreateFeedingScheduleData,
   type FeedingSchedule,
 } from "@/lib/feeding-schedule-service";
 
+/* --------------------------------------------
+   Types & Constants
+--------------------------------------------- */
 interface FeedingScheduleModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -36,7 +38,9 @@ const DAYS_OF_WEEK = [
   { value: 6, label: "Saturday", short: "Sat" },
 ];
 
-/** Evenly spaced times 07:00 → 17:00, last fixed to 17:00. */
+/* --------------------------------------------
+   Helper Functions
+--------------------------------------------- */
 const generateTimes = (count: number): string[] => {
   if (count <= 1) return ["17:00"];
   const startHour = 7;
@@ -50,12 +54,48 @@ const generateTimes = (count: number): string[] => {
   return times;
 };
 
+const timeToMinutes = (time: string): number => {
+  const [h, m] = time.split(":").map(Number);
+  return h * 60 + m;
+};
+
+function validateFeedingTimes(times: string[]): string | null {
+  const mins = times.map(timeToMinutes).sort((a, b) => a - b);
+
+  // Check daylight range (7 AM - 6 PM)
+  if (mins[0] < 420 || mins[mins.length - 1] > 1080) {
+    return "Feeding times should be within daylight hours (7:00 AM–6:00 PM).";
+  }
+
+  // Adjust spacing rule depending on frequency
+  for (let i = 1; i < mins.length; i++) {
+    const diff = mins[i] - mins[i - 1];
+
+    if (times.length === 2) {
+      // 2 feedings/day: allow 8–10 hours apart
+      if (diff < 480 || diff > 600) {
+        return "For 2×/day feedings, spacing should be 8–10 hours apart.";
+      }
+    } else {
+      // 3+ feedings/day: allow 4–5 hours apart
+      if (diff < 240 || diff > 300) {
+        return "Each feeding should be spaced 4–5 hours apart for optimal feed efficiency.";
+      }
+    }
+  }
+
+  return null;
+}
+
+
+/* --------------------------------------------
+   Component
+--------------------------------------------- */
 export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleModalProps) {
   const { user } = useAuth();
-  const { userProfile } = useUser();                   // 🔐 get role
+  const { userProfile } = useUser();
   const isAdmin = (userProfile?.role ?? "user") === "admin";
   const { ponds } = usePonds();
-  const { toast } = useToast();
 
   const [selectedPondId, setSelectedPondId] = useState(pond?.id || "");
   const selectedPond = useMemo(() => ponds.find((p) => p.id === selectedPondId), [ponds, selectedPondId]);
@@ -68,10 +108,16 @@ export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleM
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-
   const [current, setCurrent] = useState<FeedingSchedule | null>(null);
   const [autoResetKey, setAutoResetKey] = useState<string | null>(null);
 
+  // Alert dialog state
+  const [alertOpen, setAlertOpen] = useState(false);
+  const [alertMessage, setAlertMessage] = useState("");
+
+  /* --------------------------------------------
+     Effects
+  --------------------------------------------- */
   useEffect(() => {
     if (pond?.id) setSelectedPondId(pond.id);
   }, [pond?.id]);
@@ -80,7 +126,6 @@ export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleM
     setFeedingTimes((prev) => (prev.length === pondFreq ? prev : generateTimes(pondFreq)));
   }, [pondFreq]);
 
-  // Subscribe to the single schedule for the pond
   useEffect(() => {
     if (!isOpen || !sharedPondId) return;
     const unsub = feedingScheduleService.subscribeByPond(sharedPondId, (sched) => {
@@ -89,11 +134,10 @@ export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleM
       if (sched) {
         if (sched.timesPerDay === pondFreq) setFeedingTimes(sched.feedingTimes);
         else setFeedingTimes(generateTimes(pondFreq));
-
         setRepeatType(sched.repeatType);
         setSelectedDays(sched.repeatType === "weekly" ? sched.selectedDays ?? [] : [0, 1, 2, 3, 4, 5, 6]);
-        setStartDate(sched.startDate ? sched.startDate.toISOString().slice(0, 10) : "");
-        setEndDate(sched.endDate ? sched.endDate.toISOString().slice(0, 10) : "");
+        setStartDate(sched.startDate?.toISOString().slice(0, 10) ?? "");
+        setEndDate(sched.endDate?.toISOString().slice(0, 10) ?? "");
       } else {
         const today = new Date().toISOString().slice(0, 10);
         setFeedingTimes(generateTimes(pondFreq));
@@ -106,60 +150,9 @@ export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleM
     return unsub;
   }, [isOpen, sharedPondId, pondFreq]);
 
-  // If a schedule exists and pond frequency changed → auto-reset (admins only)
-  useEffect(() => {
-    if (!current || !user || !isAdmin) return;
-    if (!selectedPond?.name || !sharedPondId) return;
-    if (current.timesPerDay === pondFreq) return;
-
-    const key = `${current.id}:${pondFreq}`;
-    if (autoResetKey === key) return;
-
-    const newTimes = generateTimes(pondFreq);
-    if (newTimes.length >= 1) newTimes[newTimes.length - 1] = "17:00";
-
-    setAutoResetKey(key);
-
-    feedingScheduleService
-      .upsert(
-        user.uid,
-        {
-          pondId: sharedPondId!,
-          pondName: selectedPond.name,
-          timesPerDay: pondFreq,
-          feedingTimes: newTimes,
-          repeatType,
-          selectedDays: repeatType === "weekly" ? selectedDays : undefined,
-          startDate: startDate ? new Date(startDate) : new Date(),
-          endDate: endDate ? new Date(endDate) : undefined,
-        },
-        { email: user.email ?? null, displayName: user.displayName ?? null }
-      )
-      .then(() => {
-        toast({
-          title: "Schedule reset",
-          description: `Pond feeding frequency is now ${pondFreq}×/day. The schedule was reset.`,
-        });
-      })
-      .catch((err) => {
-        // If rules block (non-admin), this will throw "PERMISSION_DENIED"
-        console.error(err);
-      });
-  }, [
-    current,
-    pondFreq,
-    selectedPond?.name,
-    sharedPondId,
-    user,
-    repeatType,
-    selectedDays,
-    startDate,
-    endDate,
-    toast,
-    autoResetKey,
-    isAdmin,
-  ]);
-
+  /* --------------------------------------------
+     Handlers
+  --------------------------------------------- */
   const handleTimeChange = (idx: number, time: string) => {
     setFeedingTimes((prev) => {
       const next = [...prev];
@@ -174,9 +167,19 @@ export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleM
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isAdmin) return; // UI guard (rules still enforce on server)
+    if (!isAdmin) return;
+
+    // Validation
+    const validationMsg = validateFeedingTimes(feedingTimes);
+    if (validationMsg) {
+      setAlertMessage(validationMsg);
+      setAlertOpen(true);
+      return;
+    }
+
     if (!user || !selectedPond || !sharedPondId) {
-      toast({ title: "Error", description: "Please select a pond.", variant: "destructive" });
+      setAlertMessage("Please select a pond before saving.");
+      setAlertOpen(true);
       return;
     }
 
@@ -198,18 +201,13 @@ export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleM
         displayName: user.displayName ?? null,
       });
 
-      toast({
-        title: current ? "Schedule updated" : "Schedule created",
-        description: "Feeding schedule is now saved and shared with all users of this pond.",
-      });
+      setAlertMessage("✅ Feeding schedule saved successfully.");
+      setAlertOpen(true);
       onClose();
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
-      const msg =
-        err?.code === "permission-denied"
-          ? "Only admins can modify the feeding schedule."
-          : "Failed to save schedule.";
-      toast({ title: "Error", description: msg, variant: "destructive" });
+      setAlertMessage("❌ Failed to save schedule. Please try again.");
+      setAlertOpen(true);
     } finally {
       setIsLoading(false);
     }
@@ -217,187 +215,129 @@ export function FeedingScheduleModal({ isOpen, onClose, pond }: FeedingScheduleM
 
   const disableInputs = !isAdmin;
 
+  /* --------------------------------------------
+     Render
+  --------------------------------------------- */
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Calendar className="h-5 w-5 text-green-600" />
-            {current ? "Feeding Schedule" : "Feeding Schedule"}
-            {!isAdmin && (
-              <span className="ml-2 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-gray-600">
-                <Lock className="h-3.5 w-3.5" />
-                Read-only (admin manages)
-              </span>
-            )}
-          </DialogTitle>
-        </DialogHeader>
+    <>
+      {/* Main Feeding Schedule Dialog */}
+      <Dialog open={isOpen} onOpenChange={onClose}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Calendar className="h-5 w-5 text-green-600" />
+              Feeding Schedule
+              {!isAdmin && (
+                <span className="ml-2 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-gray-600">
+                  <Lock className="h-3.5 w-3.5" />
+                  Read-only (admin manages)
+                </span>
+              )}
+            </DialogTitle>
+          </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Pond */}
-          <div className="space-y-2">
-            <Label>Select Pond</Label>
-            <Select value={selectedPondId} onValueChange={setSelectedPondId} disabled={disableInputs}>
-              <SelectTrigger>
-                <SelectValue placeholder="Choose a pond" />
-              </SelectTrigger>
-              <SelectContent>
-                {ponds.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Times per day (locked to pond) */}
-          <div className="space-y-1">
-            <Label>Feeding Times Per Day</Label>
-            <div className="rounded-md border bg-gray-50 px-3 py-2 text-sm">
-              {pondFreq} time{pondFreq > 1 ? "s" : ""} per day{" "}
-              <span className="text-gray-500">(from pond settings)</span>
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Pond Selector */}
+            <div className="space-y-2">
+              <Label>Select Pond</Label>
+              <Select value={selectedPondId} onValueChange={setSelectedPondId} disabled={disableInputs}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Choose a pond" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ponds.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <div className="flex items-center gap-2 text-xs text-gray-600 mt-1">
-              <Info className="h-3.5 w-3.5" />
-              Changing the pond’s feeding frequency will reset this schedule.
-            </div>
-          </div>
 
-          {/* Feeding times */}
-          <div className="space-y-2">
-            <Label className="flex items-center gap-2">
-              <Clock className="h-4 w-4" />
-              Feeding Times
-            </Label>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              {Array.from({ length: pondFreq }).map((_, i) => (
-                <div key={i} className="space-y-1">
-                  <Label className="text-xs text-gray-500">Time {i + 1}</Label>
-                  <Input
-                    type="time"
-                    value={feedingTimes[i] ?? ""}
-                    onChange={(e) => handleTimeChange(i, e.target.value)}
-                    className="text-center"
-                    required
-                    disabled={disableInputs}
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Repeat */}
-          <div className="space-y-2">
-            <Label className="flex items-center gap-2">
-              <Repeat className="h-4 w-4" />
-              Repeat Schedule
-            </Label>
-            <Select
-              value={repeatType}
-              onValueChange={(v: "daily" | "weekly") => setRepeatType(v)}
-              disabled={disableInputs}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="daily">Daily (Every day)</SelectItem>
-                <SelectItem value="weekly">Weekly (Select days)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {repeatType === "weekly" && (
-            <div className="space-y-3">
-              <Label>Select Days</Label>
-              <div className="flex flex-wrap gap-3">
-                {DAYS_OF_WEEK.map((d) => (
-                  <label key={d.value} className="flex items-center gap-2 cursor-pointer">
-                    <Checkbox
-                      checked={selectedDays.includes(d.value)}
-                      onCheckedChange={() => toggleDay(d.value)}
+            {/* Feeding Times */}
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                <Clock className="h-4 w-4" />
+                Feeding Times ({pondFreq}×/day)
+              </Label>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                {feedingTimes.map((time, i) => (
+                  <div key={i}>
+                    <Label className="text-xs text-gray-500">Time {i + 1}</Label>
+                    <Input
+                      type="time"
+                      value={time}
+                      onChange={(e) => handleTimeChange(i, e.target.value)}
+                      className="text-center"
+                      required
                       disabled={disableInputs}
                     />
-                    <span className="text-sm">{d.short}</span>
-                  </label>
+                  </div>
                 ))}
               </div>
-            </div>
-          )}
-
-          {/* Dates */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Start Date</Label>
-              <Input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                required
-                disabled={disableInputs}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>End Date (Optional)</Label>
-              <Input
-                type="date"
-                value={endDate}
-                min={startDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                disabled={disableInputs}
-              />
-            </div>
-          </div>
-
-          {/* Current schedule */}
-          <div className="rounded-lg border p-4 bg-gray-50">
-            <div className="text-sm font-medium mb-2">Current Schedule</div>
-            {current ? (
-              <div className="text-sm grid gap-1">
-                <div><b>Pond:</b> {current.pondName}</div>
-                <div><b>Times/Day:</b> {current.timesPerDay}</div>
-                <div><b>Times:</b> {current.feedingTimes.join(", ")}</div>
-                <div>
-                  <b>Repeat:</b>{" "}
-                  {current.repeatType === "daily"
-                    ? "Daily"
-                    : `Weekly (${(current.selectedDays ?? [])
-                        .map((d) => DAYS_OF_WEEK.find((x) => x.value === d)?.short)
-                        .filter(Boolean)
-                        .join(", ")})`}
-                </div>
-                <div><b>Start:</b> {current.startDate.toISOString().slice(0, 10)}</div>
-                {current.endDate && (<div><b>End:</b> {current.endDate.toISOString().slice(0, 10)}</div>)}
-                <div className="mt-2 flex items-center gap-2 text-gray-700">
-                  <UserCircle2 className="h-4 w-4" />
-                  <span className="text-xs">
-                    Set by <b>{current.createdBy.displayName || current.createdBy.email || current.createdBy.userId}</b>
-                    {current.lastUpdatedBy && (
-                      <> • Last edit by <b>{current.lastUpdatedBy.displayName || current.lastUpdatedBy.email || current.lastUpdatedBy.userId}</b></>
-                    )}
-                  </span>
-                </div>
+              <div className="flex items-start gap-2 text-xs text-gray-600 bg-amber-50 border border-amber-200 rounded-md p-2 mt-2">
+                <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5" />
+                <p>
+                  <b>Tip:</b> Tilapia are daytime feeders. Spread feedings evenly during daylight hours.
+                  <br />• 2×/day → 9:00 AM & 4–5:00 PM <br />• 3×/day → 8:00 AM, 12:00 PM & 4:00 PM
+                </p>
               </div>
-            ) : (
-              <div className="text-sm text-gray-500">No schedule set yet.</div>
-            )}
-          </div>
+            </div>
 
-          {/* Actions */}
-          <div className="flex justify-end gap-3 pt-2">
-            <Button type="button" variant="outline" onClick={onClose}>
-              <X className="h-4 w-4 mr-2" /> Close
-            </Button>
-            {isAdmin && (
-              <Button type="submit" disabled={isLoading}>
-                <Save className="h-4 w-4 mr-2" />
-                {isLoading ? "Saving..." : current ? "Save Changes" : "Create Schedule"}
+            {/* Dates */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Label>Start Date</Label>
+                <Input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  required
+                  disabled={disableInputs}
+                />
+              </div>
+              <div>
+                <Label>End Date (Optional)</Label>
+                <Input
+                  type="date"
+                  value={endDate}
+                  min={startDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  disabled={disableInputs}
+                />
+              </div>
+            </div>
+
+            {/* Submit Buttons */}
+            <div className="flex justify-end gap-3 pt-2">
+              <Button type="button" variant="outline" onClick={onClose}>
+                <X className="h-4 w-4 mr-2" /> Close
               </Button>
-            )}
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
+              {isAdmin && (
+                <Button type="submit" disabled={isLoading}>
+                  <Save className="h-4 w-4 mr-2" />
+                  {isLoading ? "Saving..." : "Save Schedule"}
+                </Button>
+              )}
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ⚠️ Alert Dialog */}
+      <Dialog open={alertOpen} onOpenChange={setAlertOpen}>
+        <DialogContent className="max-w-sm text-center space-y-4">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-center gap-2 text-amber-600">
+              <AlertTriangle className="h-5 w-5" /> Feeding Schedule Warning
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-gray-700 whitespace-pre-line">{alertMessage}</p>
+          <Button variant="outline" onClick={() => setAlertOpen(false)}>
+            OK
+          </Button>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

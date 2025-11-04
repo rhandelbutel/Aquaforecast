@@ -9,7 +9,6 @@ import type { UnifiedPond } from "@/lib/pond-context"
 import { GrowthService, type GrowthHistory } from "@/lib/growth-service"
 import { subscribeMortalityLogs, computeSurvivalRateFromLogs, type MortalityLog } from "@/lib/mortality-service"
 import { useAuth } from "@/lib/auth-context"
-
 import { AIInsightsCard } from "@/components/dashboard/ai-insights"
 import { useAquaSensors } from "@/hooks/useAquaSensors"
 import {
@@ -19,11 +18,12 @@ import {
   type LiveReading,
 } from "@/lib/dash-insights-service"
 
-// 👇 NEW: direct Firestore imports
+// Firestore realtime hooks
 import { db } from "@/lib/firebase"
 import { doc, onSnapshot, collection } from "firebase/firestore"
 
-type GrowthStage = { from: number; to: number | null; rate: number }
+/* ---------------- Stage-based model ---------------- */
+type GrowthStage = { from: number; to: number | null; rate: number } // g/week
 
 const TILAPIA_STAGES: GrowthStage[] = [
   { from: 1, to: 15, rate: 4.0 },
@@ -47,15 +47,12 @@ const stageWeeklyRate = (w: number) => {
 }
 const stageRatePerFortnight = (w: number) => stageWeeklyRate(w) * (CADENCE_DAYS / 7)
 
+/* ---------------- Helpers ---------------- */
 const tsToDate = (v: any): Date | null => {
   if (!v) return null
   if (v instanceof Date) return v
   if (typeof v?.toDate === "function") {
-    try {
-      return v.toDate() as Date
-    } catch {
-      return null
-    }
+    try { return v.toDate() as Date } catch { return null }
   }
   if (typeof v?.seconds === "number") return new Date(v.seconds * 1000)
   const d = new Date(v)
@@ -68,6 +65,31 @@ const addDays = (base: Date, days: number) => {
   return d
 }
 
+/* ---------------- Rule-based sensor multiplier ----------------
+   Same ranges as analytics/growth chart:
+   pH: 6.5–9.0  |  DO: 3–5 mg/L  |  Temp: 28–31 °C
+---------------------------------------------------------------- */
+function computeGrowthMultiplier(
+  ph: number | null,
+  do_: number | null,
+  temp: number | null
+): number {
+  if (ph == null || do_ == null || temp == null) return 1.0
+
+  let phFactor = 1.0
+  if (ph < 6.5 || ph > 9) phFactor = 0.7
+  else if (ph < 7 || ph > 8.5) phFactor = 0.9
+
+  let doFactor = 1.0
+  if (do_ < 3 || do_ > 5) doFactor = 0.7
+
+  let tempFactor = 1.0
+  if (temp < 28 || temp > 31) tempFactor = 0.8
+
+  return phFactor * doFactor * tempFactor // <= 1.0
+}
+
+/* ---------- Days to target (baseline) ---------- */
 function daysFromLastABWToTarget15d(currentABW: number, target: number): number {
   if (!Number.isFinite(currentABW) || !Number.isFinite(target)) return 0
   if (target <= currentABW) return 0
@@ -90,6 +112,33 @@ function daysFromLastABWToTarget15d(currentABW: number, target: number): number 
   return days
 }
 
+/* ---------- Days to target (live-adjusted by sensor multiplier) ---------- */
+function daysFromLastABWToTarget15dWithMultiplier(currentABW: number, target: number, multiplier: number): number {
+  if (!Number.isFinite(currentABW) || !Number.isFinite(target)) return 0
+  if (target <= currentABW) return 0
+
+  const m = Math.max(0.1, Math.min(1.0, Number.isFinite(multiplier) ? multiplier : 1.0)) // safety clamp
+  let cur = Math.max(currentABW, 1)
+  let days = 0
+
+  for (let i = 0; i < 200; i++) {
+    // slow down stage gains by multiplier
+    const gain15 = stageRatePerFortnight(cur) * m
+    if (gain15 <= 0) return days
+    const next = cur + gain15
+    if (next >= target) {
+      const dailyGain = gain15 / CADENCE_DAYS
+      const remaining = target - cur
+      const insideDays = Math.ceil(remaining / dailyGain)
+      return days + insideDays
+    }
+    cur = next
+    days += CADENCE_DAYS
+  }
+  return days
+}
+
+/* ---------------- Component ---------------- */
 interface HarvestPredictionProps {
   pond: UnifiedPond
   aliveFish?: number | null
@@ -116,7 +165,8 @@ export function HarvestPredictionDashboard({
   const [survival, setSurvival] = useState<number | null>(null)
 
   const sharedPondId = (pond as any).adminPondId || pond.id
-  const { setOnReading } = useAquaSensors()
+  // ⬇️ now also read live sensor data + online state
+  const { data: sensorData, isOnline, setOnReading } = useAquaSensors()
 
   // --- Live sensor insights
   useEffect(() => {
@@ -175,26 +225,18 @@ export function HarvestPredictionDashboard({
     }
   }, [sharedPondId, user, refreshTrigger])
 
-  // --- 🔁 NEW: Direct Firestore real-time listeners for instant “Due” updates
+  // --- Direct Firestore listeners for instant “Due” updates
   useEffect(() => {
     if (!pond?.id || !user?.uid) return
-
     const growthRef = doc(db, "growthSetups", pond.id)
     const unsubGrowth = onSnapshot(growthRef, () => {
       detectGrowthDueDash(pond.id, user.uid)
     })
-
     const mortalityCol = collection(db, "mortalityLogs", pond.id, "items")
     const unsubMortality = onSnapshot(mortalityCol, () => {
       detectMortalityDueDash(pond.id, pond.name)
     })
-
-    return () => {
-      try {
-        unsubGrowth()
-        unsubMortality()
-      } catch {}
-    }
+    return () => { try { unsubGrowth(); unsubMortality() } catch {} }
   }, [pond?.id, user?.uid])
 
   // --- Derived metrics
@@ -214,19 +256,36 @@ export function HarvestPredictionDashboard({
   const expectedYield =
     typeof targetWeight === "number" ? (targetWeight * estimatedSurvivorsAtHarvest) / 1000 : null
 
-  const { harvestDate, daysLeft, harvestNote } = useMemo(() => {
+  // --- LIVE multiplier from sensors (<=1.0). If offline, treat as 1.0 (no change).
+  const growthMultiplier = useMemo(() => {
+    if (!isOnline || !sensorData) return 1.0
+    return computeGrowthMultiplier(sensorData.ph ?? null, sensorData.do ?? null, sensorData.temp ?? null)
+  }, [sensorData, isOnline])
+
+  const { harvestDate, daysLeft, harvestNote, usedLive } = useMemo(() => {
     if (targetWeight == null || targetWeight <= 0)
-      return { harvestDate: null, daysLeft: null, harvestNote: "Set a target weight." }
+      return { harvestDate: null, daysLeft: null, harvestNote: "Set a target weight.", usedLive: false }
     if (currentABW == null)
-      return { harvestDate: null, daysLeft: null, harvestNote: "Current ABW not set." }
+      return { harvestDate: null, daysLeft: null, harvestNote: "Current ABW not set.", usedLive: false }
 
     const startDate = lastABWAt ?? new Date()
-    const totalFromLastLog = daysFromLastABWToTarget15d(currentABW, targetWeight)
+    // compute baseline
+    const totalBaseline = daysFromLastABWToTarget15d(currentABW, targetWeight)
     const elapsed = Math.max(0, Math.floor((Date.now() - startDate.getTime()) / 86_400_000))
-    const left = Math.max(0, totalFromLastLog - elapsed)
+    let leftBaseline = Math.max(0, totalBaseline - elapsed)
+
+    // optionally apply live multiplier when online
+    let left = leftBaseline
+    let used = false
+    if (isOnline && growthMultiplier < 0.999) {
+      const totalLive = daysFromLastABWToTarget15dWithMultiplier(currentABW, targetWeight, growthMultiplier)
+      left = Math.max(0, totalLive - elapsed)
+      used = true
+    }
+
     const date = addDays(new Date(), left)
-    return { harvestDate: date, daysLeft: left, harvestNote: null }
-  }, [currentABW, targetWeight, lastABWAt])
+    return { harvestDate: date, daysLeft: left, harvestNote: null, usedLive: used }
+  }, [currentABW, targetWeight, lastABWAt, isOnline, growthMultiplier])
 
   const readinessRaw = currentABW && targetWeight ? (currentABW / targetWeight) * 100 : 0
   const readinessPercentage = Math.max(0, Math.min(100, Math.round(readinessRaw)))
@@ -307,7 +366,7 @@ export function HarvestPredictionDashboard({
               <div className="flex items-center">
                 <Calendar className="h-5 w-5 text-purple-600 mr-2" />
                 <div>
-                  <p className="text-sm text-gray-600">Predicted Harvest</p>
+                  <p className="text-sm text-gray-600">Predicted Harvest {isOnline && <span className="ml-1 text-[10px] opacity-70">(live)</span>}</p>
                   {harvestDate ? (
                     <>
                       <p className="text-lg font-bold">
@@ -322,10 +381,17 @@ export function HarvestPredictionDashboard({
                           ? `${daysLeft} day${daysLeft === 1 ? "" : "s"} left`
                           : ""}
                       </p>
+                      {/* Explain live adjustment when we used the multiplier */}
+                      {usedLive && (
+                        <p className="text-xs text-amber-700 mt-0.5">
+                          Live-adjusted due to water conditions (×{growthMultiplier.toFixed(2)})
+                        </p>
+                      )}
                     </>
                   ) : (
                     <p className="text-xs text-gray-500">
-                      {harvestNote ?? "Not enough data yet. Set current ABW and a target weight."}
+                      { /* show baseline note */ }
+                      {"Not enough data yet. Set current ABW and a target weight."}
                     </p>
                   )}
                 </div>
