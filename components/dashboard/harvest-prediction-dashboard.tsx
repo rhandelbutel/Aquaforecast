@@ -52,7 +52,11 @@ const tsToDate = (v: any): Date | null => {
   if (!v) return null
   if (v instanceof Date) return v
   if (typeof v?.toDate === "function") {
-    try { return v.toDate() as Date } catch { return null }
+    try {
+      return v.toDate() as Date
+    } catch {
+      return null
+    }
   }
   if (typeof v?.seconds === "number") return new Date(v.seconds * 1000)
   const d = new Date(v)
@@ -66,7 +70,6 @@ const addDays = (base: Date, days: number) => {
 }
 
 /* ---------------- Rule-based sensor multiplier ----------------
-   Same ranges as analytics/growth chart:
    pH: 6.5–9.0  |  DO: 3–5 mg/L  |  Temp: 28–31 °C
 ---------------------------------------------------------------- */
 function computeGrowthMultiplier(
@@ -86,7 +89,7 @@ function computeGrowthMultiplier(
   let tempFactor = 1.0
   if (temp < 28 || temp > 31) tempFactor = 0.8
 
-  return phFactor * doFactor * tempFactor // <= 1.0
+  return phFactor * doFactor * tempFactor
 }
 
 /* ---------- Days to target (baseline) ---------- */
@@ -113,16 +116,19 @@ function daysFromLastABWToTarget15d(currentABW: number, target: number): number 
 }
 
 /* ---------- Days to target (live-adjusted by sensor multiplier) ---------- */
-function daysFromLastABWToTarget15dWithMultiplier(currentABW: number, target: number, multiplier: number): number {
+function daysFromLastABWToTarget15dWithMultiplier(
+  currentABW: number,
+  target: number,
+  multiplier: number
+): number {
   if (!Number.isFinite(currentABW) || !Number.isFinite(target)) return 0
   if (target <= currentABW) return 0
 
-  const m = Math.max(0.1, Math.min(1.0, Number.isFinite(multiplier) ? multiplier : 1.0)) // safety clamp
+  const m = Math.max(0.1, Math.min(1.0, Number.isFinite(multiplier) ? multiplier : 1.0))
   let cur = Math.max(currentABW, 1)
   let days = 0
 
   for (let i = 0; i < 200; i++) {
-    // slow down stage gains by multiplier
     const gain15 = stageRatePerFortnight(cur) * m
     if (gain15 <= 0) return days
     const next = cur + gain15
@@ -165,10 +171,9 @@ export function HarvestPredictionDashboard({
   const [survival, setSurvival] = useState<number | null>(null)
 
   const sharedPondId = (pond as any).adminPondId || pond.id
-  // ⬇️ now also read live sensor data + online state
   const { data: sensorData, isOnline, setOnReading } = useAquaSensors()
 
-  // --- Live sensor insights
+  // Live sensor insights
   useEffect(() => {
     if (!sharedPondId) return
     setOnReading((r) => {
@@ -183,7 +188,7 @@ export function HarvestPredictionDashboard({
     return () => setOnReading(undefined)
   }, [setOnReading, sharedPondId, pond.name])
 
-  // --- Growth, mortality, survival tracking
+  // Growth, mortality, survival tracking
   useEffect(() => {
     if (!user || !sharedPondId) return
     const unsubSetup = GrowthService.subscribeGrowthSetup(sharedPondId, (setup) => {
@@ -225,21 +230,22 @@ export function HarvestPredictionDashboard({
     }
   }, [sharedPondId, user, refreshTrigger])
 
-  // --- Direct Firestore listeners for instant “Due” updates
+  // Firestore instant “Due” updates
   useEffect(() => {
     if (!pond?.id || !user?.uid) return
     const growthRef = doc(db, "growthSetups", pond.id)
-    const unsubGrowth = onSnapshot(growthRef, () => {
-      detectGrowthDueDash(pond.id, user.uid)
-    })
+    const unsubGrowth = onSnapshot(growthRef, () => detectGrowthDueDash(pond.id, user.uid))
     const mortalityCol = collection(db, "mortalityLogs", pond.id, "items")
-    const unsubMortality = onSnapshot(mortalityCol, () => {
-      detectMortalityDueDash(pond.id, pond.name)
-    })
-    return () => { try { unsubGrowth(); unsubMortality() } catch {} }
+    const unsubMortality = onSnapshot(mortalityCol, () => detectMortalityDueDash(pond.id, pond.name))
+    return () => {
+      try {
+        unsubGrowth()
+        unsubMortality()
+      } catch {}
+    }
   }, [pond?.id, user?.uid])
 
-  // --- Derived metrics
+  // Derived metrics
   const initial: number = (initialStocked ?? pond.fishCount ?? 0) || 0
   const alive: number = (aliveFish ?? pond.fishCount ?? 0) || 0
   const computedSurvivalRate: number =
@@ -256,25 +262,28 @@ export function HarvestPredictionDashboard({
   const expectedYield =
     typeof targetWeight === "number" ? (targetWeight * estimatedSurvivorsAtHarvest) / 1000 : null
 
-  // --- LIVE multiplier from sensors (<=1.0). If offline, treat as 1.0 (no change).
+  // LIVE multiplier
   const growthMultiplier = useMemo(() => {
     if (!isOnline || !sensorData) return 1.0
     return computeGrowthMultiplier(sensorData.ph ?? null, sensorData.do ?? null, sensorData.temp ?? null)
   }, [sensorData, isOnline])
 
-  const { harvestDate, daysLeft, harvestNote, usedLive } = useMemo(() => {
-    if (targetWeight == null || targetWeight <= 0)
-      return { harvestDate: null, daysLeft: null, harvestNote: "Set a target weight.", usedLive: false }
-    if (currentABW == null)
-      return { harvestDate: null, daysLeft: null, harvestNote: "Current ABW not set.", usedLive: false }
+  // Harvest-ready detection
+  const harvestReady = useMemo(() => {
+    if (currentABW == null || targetWeight == null || targetWeight <= 0) return false
+    return currentABW >= targetWeight
+  }, [currentABW, targetWeight])
+
+  // Compute predicted harvest date (even if already reached)
+  const { harvestDate, daysLeft, usedLive } = useMemo(() => {
+    if (targetWeight == null || targetWeight <= 0 || currentABW == null)
+      return { harvestDate: null, daysLeft: null, usedLive: false }
 
     const startDate = lastABWAt ?? new Date()
-    // compute baseline
     const totalBaseline = daysFromLastABWToTarget15d(currentABW, targetWeight)
     const elapsed = Math.max(0, Math.floor((Date.now() - startDate.getTime()) / 86_400_000))
     let leftBaseline = Math.max(0, totalBaseline - elapsed)
 
-    // optionally apply live multiplier when online
     let left = leftBaseline
     let used = false
     if (isOnline && growthMultiplier < 0.999) {
@@ -284,20 +293,21 @@ export function HarvestPredictionDashboard({
     }
 
     const date = addDays(new Date(), left)
-    return { harvestDate: date, daysLeft: left, harvestNote: null, usedLive: used }
-  }, [currentABW, targetWeight, lastABWAt, isOnline, growthMultiplier])
+    return { harvestDate: date, daysLeft: left, usedLive: used }
+  }, [targetWeight, currentABW, lastABWAt, isOnline, growthMultiplier])
 
-  const readinessRaw = currentABW && targetWeight ? (currentABW / targetWeight) * 100 : 0
-  const readinessPercentage = Math.max(0, Math.min(100, Math.round(readinessRaw)))
+  const readinessRaw = currentABW && targetWeight ? Math.min(100, (currentABW / targetWeight) * 100) : 0
+  const readinessPercentage = harvestReady ? 100 : Math.max(0, Math.round(readinessRaw))
 
-  const status =
-    readinessPercentage >= 90
-      ? { text: "Ready for Harvest", color: "bg-green-100 text-green-800" }
-      : readinessPercentage >= 75
-      ? { text: "Nearly Ready", color: "bg-yellow-100 text-yellow-800" }
-      : readinessPercentage >= 60
-      ? { text: "On Track for Target Weight", color: "bg-blue-100 text-blue-800" }
-      : { text: "Early Growth Phase", color: "bg-gray-100 text-gray-800" }
+  const status = harvestReady
+    ? { text: "Harvest-ready", color: "bg-green-100 text-green-800" }
+    : readinessPercentage >= 90
+    ? { text: "Ready for Harvest", color: "bg-green-100 text-green-800" }
+    : readinessPercentage >= 75
+    ? { text: "Nearly Ready", color: "bg-yellow-100 text-yellow-800" }
+    : readinessPercentage >= 60
+    ? { text: "On Track for Target Weight", color: "bg-blue-100 text-blue-800" }
+    : { text: "Early Growth Phase", color: "bg-gray-100 text-gray-800" }
 
   return (
     <div id="export-harvest" className="w-full">
@@ -309,15 +319,14 @@ export function HarvestPredictionDashboard({
               <Target className="h-5 w-5 mr-2 text-cyan-600" />
               {pond.name} – Harvest Prediction
             </h2>
-            <p className="text-gray-600 text-sm mt-1">
-              Stage-based growth forecast for Tilapia (15-day cadence)
-            </p>
+            <p className="text-gray-600 text-sm mt-1">Stage-based growth forecast for Tilapia (15-day cadence)</p>
           </div>
           <Badge className={status.color}>{status.text}</Badge>
         </div>
 
         {/* Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {/* Latest ABW */}
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center">
@@ -336,9 +345,7 @@ export function HarvestPredictionDashboard({
                         ABW update due
                       </span>
                     ) : (
-                      <span className="text-gray-500">
-                        Next update in {daysUntilUpdate}d
-                      </span>
+                      <span className="text-gray-500">Next update in {daysUntilUpdate}d</span>
                     )}
                   </p>
                 </div>
@@ -346,6 +353,7 @@ export function HarvestPredictionDashboard({
             </CardContent>
           </Card>
 
+          {/* Biomass */}
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center">
@@ -361,12 +369,16 @@ export function HarvestPredictionDashboard({
             </CardContent>
           </Card>
 
+          {/* Predicted Harvest */}
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center">
                 <Calendar className="h-5 w-5 text-purple-600 mr-2" />
                 <div>
-                  <p className="text-sm text-gray-600">Predicted Harvest {isOnline && <span className="ml-1 text-[10px] opacity-70">(live)</span>}</p>
+                  <p className="text-sm text-gray-600">
+                    Predicted Harvest {isOnline && <span className="ml-1 text-[10px] opacity-70">(live)</span>}
+                  </p>
+
                   {harvestDate ? (
                     <>
                       <p className="text-lg font-bold">
@@ -376,22 +388,43 @@ export function HarvestPredictionDashboard({
                           year: "numeric",
                         })}
                       </p>
-                      <p className="text-xs text-gray-500">
+                      <p
+                        className={`text-xs mt-0.5 ${
+                          daysLeft !== null && daysLeft <= 0
+                            ? "text-green-700 font-medium"
+                            : "text-gray-500"
+                        }`}
+                      >
                         {typeof daysLeft === "number"
-                          ? `${daysLeft} day${daysLeft === 1 ? "" : "s"} left`
+                          ? daysLeft <= 0
+                            ? "Target weight has been reached or exceeded."
+                            : `${daysLeft} day${daysLeft === 1 ? "" : "s"} left`
                           : ""}
                       </p>
-                      {/* Explain live adjustment when we used the multiplier */}
+
                       {usedLive && (
                         <p className="text-xs text-amber-700 mt-0.5">
-                          Live-adjusted due to water conditions (×{growthMultiplier.toFixed(2)})
+                          Live-adjusted due to water conditions (×
+                          {(
+                            Math.max(
+                              0,
+                              Math.min(
+                                2,
+                                computeGrowthMultiplier(
+                                  sensorData?.ph ?? null,
+                                  sensorData?.do ?? null,
+                                  sensorData?.temp ?? null
+                                )
+                              )
+                            )
+                          ).toFixed(2)}
+                          )
                         </p>
                       )}
                     </>
                   ) : (
                     <p className="text-xs text-gray-500">
-                      { /* show baseline note */ }
-                      {"Not enough data yet. Set current ABW and a target weight."}
+                      Not enough data yet. Set current ABW and a target weight.
                     </p>
                   )}
                 </div>
@@ -399,6 +432,7 @@ export function HarvestPredictionDashboard({
             </CardContent>
           </Card>
 
+          {/* Expected Yield */}
           <Card>
             <CardContent className="p-4">
               <div className="flex items-center">
