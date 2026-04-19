@@ -34,7 +34,7 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
   const [logs, setLogs] = useState<MortalityLog[]>([])
   const [lastLogDate, setLastLogDate] = useState<Date | null>(null)
 
-  const [rateStr, setRateStr] = useState("")
+  const [deadFishStr, setDeadFishStr] = useState("")
   const [dateStr, setDateStr] = useState("")
 
   const sharedPondId = (pond as any)?.adminPondId || pond?.id
@@ -58,7 +58,7 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
         setLastLogDate(latest?.date ?? null)
 
         setDateStr(toYMD(new Date()))
-        setRateStr("")
+        setDeadFishStr("")
         setError("")
         setSuccess("")
       } catch (e) {
@@ -70,17 +70,21 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
     })()
   }, [isOpen, sharedPondId])
 
-  const initialFishCount = pond?.fishCount || 0
-  const survivalPct = computeSurvivalRateFromLogs(logs)
+  const initialFishCount =
+    typeof (pond as any)?.initialFishCount === "number"
+      ? (pond as any).initialFishCount
+      : pond?.fishCount || 0
+
+  const survivalPct = computeSurvivalRateFromLogs(logs, initialFishCount)
   const estimatedAlive = Math.max(0, Math.round((survivalPct / 100) * initialFishCount))
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!user || !sharedPondId) return
 
-    const rate = Number.parseFloat(rateStr)
-    if (!Number.isFinite(rate) || rate <= 0 || rate > 100) {
-      setError("Enter a valid mortality rate (> 0 and ≤ 100).")
+    const deadFishCount = Number.parseInt(deadFishStr, 10)
+    if (!Number.isFinite(deadFishCount) || deadFishCount <= 0) {
+      setError("Enter a valid number of dead fish greater than 0.")
       return
     }
 
@@ -92,17 +96,17 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
         pondId: sharedPondId,
         pondName: pond.name,
         userId: user.uid,
-        date: new Date(), // always today
-        mortalityRate: rate,
+        date: new Date(),
+        deadFishCount,
+        initialFishCount,
       })
 
-      // refresh logs after update
       const l = await getMortalityLogs(sharedPondId)
       setLogs(l)
       const latest = l[0] ?? null
       setLastLogDate(latest?.date ?? null)
 
-      setRateStr("")
+      setDeadFishStr("")
       setSuccess("Mortality log updated successfully.")
       onSuccess?.()
     } catch (err: any) {
@@ -129,13 +133,11 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
         </CardHeader>
 
         <CardContent className="space-y-6">
-          {/* Info banner */}
           <div className="text-xs flex items-center gap-2 text-indigo-700">
             <AlertCircle className="h-4 w-4" />
-            Updating mortality data for this pond.
+            Record mortality only when dead fish are actually observed.
           </div>
 
-          {/* Top metrics */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 bg-gray-50 rounded-lg">
             <div className="text-center">
               <div className="text-2xl font-bold text-green-600">
@@ -155,7 +157,6 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
             </div>
           </div>
 
-          {/* Update form */}
           <form onSubmit={handleSave} className="space-y-4 border-t pt-4">
             <h3 className="text-lg font-semibold">Update Mortality Log</h3>
 
@@ -185,16 +186,15 @@ export function MortalityLogModal({ isOpen, onClose, pond, onSuccess }: Mortalit
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="mortality-rate">Mortality Rate (%)</Label>
+                <Label htmlFor="dead-fish-count">Number of Dead Fish</Label>
                 <Input
-                  id="mortality-rate"
+                  id="dead-fish-count"
                   type="number"
-                  min={0}
-                  max={100}
-                  step={0.1}
-                  value={rateStr}
-                  onChange={(e) => setRateStr(e.target.value)}
-                  placeholder="e.g. 1.5"
+                  min={1}
+                  step={1}
+                  value={deadFishStr}
+                  onChange={(e) => setDeadFishStr(e.target.value)}
+                  placeholder="e.g. 12"
                   required
                 />
               </div>

@@ -14,6 +14,20 @@ interface SignUpFormProps {
   onSignInClick: () => void
 }
 
+function sanitizeEmailInput(value: string): string {
+  return value
+    .replace(/\s/g, "")
+    .replace(/[^a-zA-Z0-9@._-]/g, "")
+    .slice(0, 30)
+}
+
+function sanitizePasswordInput(value: string): string {
+  return value
+    .replace(/[\u{1F300}-\u{1FAFF}]/gu, "")
+    .replace(/\s/g, "")
+    .slice(0, 25)
+}
+
 export function SignUpForm({ onSignInClick }: SignUpFormProps) {
   const [studentId, setStudentId] = useState("")
   const [email, setEmail] = useState("")
@@ -26,12 +40,9 @@ export function SignUpForm({ onSignInClick }: SignUpFormProps) {
   const { signUp } = useAuth()
   const [showConfirm, setShowConfirm] = useState(false)
 
-  // 🧩 Format student ID automatically as XX-XXXXX
   const handleStudentIdChange = (value: string) => {
-    // remove non-numeric characters except dash
-    const cleaned = value.replace(/[^0-9]/g, "").slice(0, 7) // only digits
+    const cleaned = value.replace(/[^0-9]/g, "").slice(0, 7)
 
-    // auto-insert dash after 2nd digit if there are more than 2 digits
     let formatted = cleaned
     if (cleaned.length > 2) {
       formatted = cleaned.slice(0, 2) + "-" + cleaned.slice(2)
@@ -47,22 +58,36 @@ export function SignUpForm({ onSignInClick }: SignUpFormProps) {
 
     const trimmedId = studentId.trim()
 
-    // Validate Student ID format: 2 digits, dash, then 3–5 digits
     if (!/^\d{2}-\d{3,5}$/.test(trimmedId)) {
       setError("Student ID must follow the format XX-XXXXX (e.g., 22-12345).")
       return
     }
 
-    if (!trimmedId) { setError("Student ID is required."); return }
-    if (trimmedId.length < 5) { setError("Student ID is too short."); return }
+    if (!trimmedId) {
+      setError("Student ID is required.")
+      return
+    }
+
+    if (trimmedId.length < 5) {
+      setError("Student ID is too short.")
+      return
+    }
 
     const usernamePart = email.split("@")[0]
     if (usernamePart.length < 6 || usernamePart.length > 30) {
       setError("Email username must be between 6 and 30 characters before @.")
       return
     }
-    if (password !== confirmPassword) { setError("Passwords do not match."); return }
-    if (password.length < 6) { setError("Password must be at least 6 characters long."); return }
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.")
+      return
+    }
+
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters long.")
+      return
+    }
 
     setShowConfirm(true)
   }
@@ -73,7 +98,6 @@ export function SignUpForm({ onSignInClick }: SignUpFormProps) {
     setError("")
     setSuccess("")
     try {
-      // studentId is already formatted correctly (e.g., 22-12345)
       await signUp(email, password, studentId.trim())
       setSuccess("Account created successfully! Please wait for admin approval before accessing the dashboard.")
     } catch (error: any) {
@@ -91,10 +115,19 @@ export function SignUpForm({ onSignInClick }: SignUpFormProps) {
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <h2 className="text-2xl font-bold text-center mb-6">Sign Up</h2>
-      {error && (<Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>)}
-      {success && (<Alert className="border-green-200 bg-green-50"><AlertDescription className="text-green-800">{success}</AlertDescription></Alert>)}
 
-      {/* Student ID */}
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      {success && (
+        <Alert className="border-green-200 bg-green-50">
+          <AlertDescription className="text-green-800">{success}</AlertDescription>
+        </Alert>
+      )}
+
       <div className="space-y-2">
         <Label htmlFor="studentId">Student ID</Label>
         <Input
@@ -102,7 +135,7 @@ export function SignUpForm({ onSignInClick }: SignUpFormProps) {
           type="text"
           inputMode="numeric"
           placeholder="e.g. 22-12345"
-          maxLength={8} // includes dash
+          maxLength={8}
           value={studentId}
           onChange={(e) => handleStudentIdChange(e.target.value)}
           required
@@ -110,7 +143,6 @@ export function SignUpForm({ onSignInClick }: SignUpFormProps) {
         <p className="text-xs text-gray-500">Format: XX-XXXXX (dash auto-added)</p>
       </div>
 
-      {/* Email */}
       <div className="space-y-2">
         <Label htmlFor="email">Email</Label>
         <Input
@@ -119,12 +151,11 @@ export function SignUpForm({ onSignInClick }: SignUpFormProps) {
           placeholder="Enter your email"
           maxLength={30}
           value={email}
-          onChange={(e) => setEmail(e.target.value.slice(0, 30))}
+          onChange={(e) => setEmail(sanitizeEmailInput(e.target.value))}
           required
         />
       </div>
 
-      {/* Password */}
       <div className="space-y-2">
         <Label htmlFor="password">Password</Label>
         <div className="relative">
@@ -134,7 +165,7 @@ export function SignUpForm({ onSignInClick }: SignUpFormProps) {
             placeholder="Enter your password"
             maxLength={25}
             value={password}
-            onChange={(e) => setPassword(e.target.value.slice(0, 25))}
+            onChange={(e) => setPassword(sanitizePasswordInput(e.target.value))}
             required
           />
           <button
@@ -147,7 +178,6 @@ export function SignUpForm({ onSignInClick }: SignUpFormProps) {
         </div>
       </div>
 
-      {/* Confirm Password */}
       <div className="space-y-2">
         <Label htmlFor="confirmPassword">Confirm Password</Label>
         <Input
@@ -156,7 +186,7 @@ export function SignUpForm({ onSignInClick }: SignUpFormProps) {
           placeholder="Confirm your password"
           maxLength={25}
           value={confirmPassword}
-          onChange={(e) => setConfirmPassword(e.target.value.slice(0, 25))}
+          onChange={(e) => setConfirmPassword(sanitizePasswordInput(e.target.value))}
           required
         />
       </div>

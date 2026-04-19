@@ -1,4 +1,4 @@
-//components/ponds/ponds-with-data.tsx
+// components/ponds/ponds-with-data.tsx
 "use client"
 
 import { useState } from "react"
@@ -6,16 +6,21 @@ import type { UnifiedPond } from "@/lib/pond-context"
 import { PondStats } from "./pond-stats"
 import { PondGrid } from "./pond-grid"
 import { Button } from "@/components/ui/button"
-import { Plus } from "lucide-react"
+import { Plus, History } from "lucide-react"
 import { AddPondModal } from "./add-pond-modal"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
 interface PondsWithDataProps {
   ponds: UnifiedPond[]
-  onClickHarvest?: () => void   // open Harvest modal from header
+  onClickHarvest?: () => void
+  onClickHistory?: () => void
 }
 
-export function PondsWithData({ ponds, onClickHarvest }: PondsWithDataProps) {
+export function PondsWithData({
+  ponds,
+  onClickHarvest,
+  onClickHistory,
+}: PondsWithDataProps) {
   const [showAddPond, setShowAddPond] = useState(false)
   const [showPondLimitAlert, setShowPondLimitAlert] = useState(false)
 
@@ -30,21 +35,34 @@ export function PondsWithData({ ponds, onClickHarvest }: PondsWithDataProps) {
   return (
     <>
       <div className="space-y-6">
-        <div className="flex items-start justify-between">
+        <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Pond Overview</h1>
             <p className="text-gray-600 mt-1">Monitor all your fish ponds</p>
           </div>
 
-          {/* Right-side actions: Add on top, Harvest below it */}
           <div className="flex flex-col items-end gap-2">
             <Button className="bg-cyan-600 hover:bg-cyan-700" onClick={handleAddPond}>
               <Plus className="h-4 w-4 mr-2" />
               Add New Pond
             </Button>
-            <Button variant="outline" onClick={onClickHarvest}>
-              Harvest
-            </Button>
+
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={onClickHarvest}>
+                Harvest
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={onClickHistory}
+                className="sm:px-3 px-2"
+                aria-label="View History"
+                title="View History"
+              >
+                <History className="h-4 w-4 sm:hidden" />
+                <span className="hidden sm:inline">View History</span>
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -52,7 +70,6 @@ export function PondsWithData({ ponds, onClickHarvest }: PondsWithDataProps) {
         <PondGrid ponds={ponds} />
       </div>
 
-      {/* Pond Limit Alert */}
       {showPondLimitAlert && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">

@@ -39,7 +39,6 @@ export class GrowthService {
   private static readonly COLLECTION_NAME = "growthsetup"
   private static readonly HISTORY_COLLECTION_NAME = "growthhistory"
 
-  // ---- Cadence settings (15-day ABW) ----
   private static readonly ABW_CADENCE_DAYS = 15
   private static readonly DAY_MS = 86_400_000
 
@@ -79,7 +78,9 @@ export class GrowthService {
         currentABW,
         lastABWUpdate: now as Timestamp,
         updatedAt: now as Timestamp,
+        isActive: true,
       }
+
       if (typeof targetWeight === "number" && targetWeight > 0) {
         updateData.targetWeight = targetWeight
       }
@@ -88,7 +89,19 @@ export class GrowthService {
       await this.addGrowthHistory(pondId, userId, currentABW)
 
       const snap = await getDoc(ref)
-      return { id, ...snap.data() } as GrowthSetup
+      const raw = { id, ...snap.data() } as Partial<GrowthSetup> & { id: string }
+
+      return {
+        id: raw.id,
+        pondId: (raw.pondId as string) ?? pondId,
+        userId: (raw.userId as string) ?? userId,
+        currentABW: typeof raw.currentABW === "number" ? raw.currentABW : 0,
+        targetWeight: typeof raw.targetWeight === "number" ? raw.targetWeight : undefined,
+        lastABWUpdate: (raw.lastABWUpdate as Timestamp) ?? (serverTimestamp() as Timestamp),
+        createdAt: (raw.createdAt as Timestamp) ?? (serverTimestamp() as Timestamp),
+        updatedAt: (raw.updatedAt as Timestamp) ?? (serverTimestamp() as Timestamp),
+        isActive: typeof raw.isActive === "boolean" ? raw.isActive : true,
+      }
     } catch (e) {
       console.error("Error saving growth setup:", e)
       throw new Error("Failed to save growth setup")
@@ -99,7 +112,11 @@ export class GrowthService {
     try {
       const id = `${pondId}`
       const ref = doc(db, this.COLLECTION_NAME, id)
-      await updateDoc(ref, { targetWeight: newTargetWeight, updatedAt: serverTimestamp() })
+      await updateDoc(ref, {
+        targetWeight: newTargetWeight,
+        updatedAt: serverTimestamp(),
+        isActive: true,
+      })
     } catch (e) {
       console.error("Error updating target weight:", e)
       throw new Error("Failed to update target weight")
@@ -115,6 +132,9 @@ export class GrowthService {
 
       const raw = { id, ...snap.data() } as Partial<GrowthSetup> & { id: string }
 
+      const isActive = typeof raw.isActive === "boolean" ? raw.isActive : true
+      if (!isActive) return null
+
       return {
         id: raw.id,
         pondId: (raw.pondId as string) ?? pondId,
@@ -124,7 +144,7 @@ export class GrowthService {
         lastABWUpdate: (raw.lastABWUpdate as Timestamp) ?? (serverTimestamp() as Timestamp),
         createdAt: (raw.createdAt as Timestamp) ?? (serverTimestamp() as Timestamp),
         updatedAt: (raw.updatedAt as Timestamp) ?? (serverTimestamp() as Timestamp),
-        isActive: typeof raw.isActive === "boolean" ? raw.isActive : true,
+        isActive,
       }
     } catch (e) {
       console.error("Error getting growth setup:", e)
@@ -170,7 +190,6 @@ export class GrowthService {
     return isNaN(d.getTime()) ? null : d
   }
 
-  // ---- Cadence-aware ABW timing (15 days) ----
   static canUpdateABW(lastABWUpdate: Timestamp | Date | unknown): boolean {
     const now = new Date()
     const last = this.toSafeDate(lastABWUpdate)
@@ -187,7 +206,6 @@ export class GrowthService {
     return Math.max(0, this.ABW_CADENCE_DAYS - days)
   }
 
-  /** Expose the same rule with a friendlier name for UIs. */
   static isABWDue(lastABWUpdate: Timestamp | Date | unknown): boolean {
     return this.canUpdateABW(lastABWUpdate)
   }
@@ -248,7 +266,12 @@ export class GrowthService {
     try {
       const id = `${pondId}`
       const ref = doc(db, this.COLLECTION_NAME, id)
-      await updateDoc(ref, { isActive: false, updatedAt: serverTimestamp() })
+      await updateDoc(ref, {
+        isActive: false,
+        currentABW: 0,
+        targetWeight: null,
+        updatedAt: serverTimestamp(),
+      })
     } catch (e) {
       console.error("Error deleting growth setup:", e)
       throw new Error("Failed to delete growth setup")
@@ -262,8 +285,20 @@ export class GrowthService {
     const id = `${pondId}`
     const ref = doc(db, this.COLLECTION_NAME, id)
     return onSnapshot(ref, (snap: any) => {
-      if (snap.exists()) callback({ id, ...snap.data() } as GrowthSetup)
-      else callback(null)
+      if (!snap.exists()) {
+        callback(null)
+        return
+      }
+
+      const data = snap.data() as Partial<GrowthSetup>
+      const isActive = typeof data?.isActive === "boolean" ? data.isActive : true
+
+      if (!isActive) {
+        callback(null)
+        return
+      }
+
+      callback({ id, ...data } as GrowthSetup)
     })
   }
 }

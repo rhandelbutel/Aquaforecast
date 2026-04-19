@@ -21,6 +21,13 @@ interface PondEditModalProps {
   onSaved?: () => void
 }
 
+function sanitizeTextInput(value: string): string {
+  return value
+    .replace(/[\u{1F300}-\u{1FAFF}]/gu, "")
+    .replace(/[^a-zA-Z0-9\s.-]/g, "")
+    .slice(0, 50)
+}
+
 export default function PondEditModal({ open, onClose, pond, onSaved }: PondEditModalProps) {
   const [error, setError] = useState("")
   const [saving, setSaving] = useState(false)
@@ -36,7 +43,6 @@ export default function PondEditModal({ open, onClose, pond, onSaved }: PondEdit
     stockingDate: "",
   })
 
-  // Prepare date input yyyy-mm-dd for stockingDate
   const stockingDateISO = useMemo(() => {
     if (!pond?.stockingDate) return ""
     const d = pond.stockingDate instanceof Date ? pond.stockingDate : new Date(pond.stockingDate)
@@ -65,6 +71,9 @@ export default function PondEditModal({ open, onClose, pond, onSaved }: PondEdit
   if (!open || !pond) return null
 
   const handleChange = (key: keyof typeof form, val: string) => {
+    if (key === "name" || key === "fishSpecies" || key === "sensorId") {
+      val = sanitizeTextInput(val)
+    }
     setForm((p) => ({ ...p, [key]: val }))
   }
 
@@ -72,7 +81,6 @@ export default function PondEditModal({ open, onClose, pond, onSaved }: PondEdit
     e.preventDefault()
     setError("")
 
-    // Validate minimally
     const area = Number(form.area)
     const depth = Number(form.depth)
     const initialFishCount = Number(form.initialFishCount)

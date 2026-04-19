@@ -1,11 +1,13 @@
+// app/ponds/page.tsx
 "use client"
 
 import { useCallback, useState } from "react"
+import { useRouter } from "next/navigation"
 import { usePonds } from "@/lib/pond-context"
 import { EmptyPonds } from "@/components/ponds/empty-ponds"
 import { PondsWithData } from "@/components/ponds/ponds-with-data"
 import HarvestModal from "@/components/admin/harvest-modal"
-import StartStockingModal from "@/components/admin/start-stocking-modal" 
+import StartStockingModal from "@/components/admin/start-stocking-modal"
 import { useAuth } from "@/lib/auth-context"
 import { isAdmin } from "@/lib/user-service"
 import { GrowthService } from "@/lib/growth-service"
@@ -22,20 +24,21 @@ import { Button } from "@/components/ui/button"
 export default function PondsPage() {
   const { ponds, loading } = usePonds()
   const { user } = useAuth()
+  const router = useRouter()
 
   const [harvestOpen, setHarvestOpen] = useState(false)
-  const [stockingOpen, setStockingOpen] = useState(false) // ✅ new state for modal
+  const [stockingOpen, setStockingOpen] = useState(false)
 
-  // Info dialog (single “OK”)
   const [infoOpen, setInfoOpen] = useState(false)
   const [infoTitle, setInfoTitle] = useState<string>("")
   const [infoMsg, setInfoMsg] = useState<string>("")
 
-  // Confirm dialog (Continue/Cancel)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [confirmTitle, setConfirmTitle] = useState<string>("")
   const [confirmMsg, setConfirmMsg] = useState<string>("")
   const [onConfirm, setOnConfirm] = useState<(() => void) | null>(null)
+
+  const userIsAdmin = !!user && isAdmin(user.email || "")
 
   const openInfo = useCallback((title: string, msg: string) => {
     setInfoTitle(title)
@@ -57,7 +60,7 @@ export default function PondsPage() {
     }
     if (!ponds.length) return
 
-    const pond = ponds[0] // single-pond app
+    const pond = ponds[0]
     const sharedPondId = (pond as any)?.adminPondId || pond.id
 
     const setup = await GrowthService.getGrowthSetup(sharedPondId, "shared")
@@ -106,19 +109,20 @@ export default function PondsPage() {
 
   return (
     <>
-      {/* Existing Pond Data & Harvest */}
-      <PondsWithData ponds={ponds} onClickHarvest={handleHarvestClick} />
+      <PondsWithData
+        ponds={ponds}
+        onClickHarvest={handleHarvestClick}
+        onClickHistory={() => router.push("/history")}
+      />
 
       <HarvestModal open={harvestOpen} onOpenChange={setHarvestOpen} ponds={ponds} />
 
-      {/* Show Start New Stocking button if pond is empty */}
-      {pond?.fishCount === 0 && (
+      {userIsAdmin && pond?.fishCount === 0 && (
         <div className="flex justify-center mt-6">
           <Button onClick={() => setStockingOpen(true)}>Start New Stocking</Button>
         </div>
       )}
 
-      {/* New Start Stocking Modal */}
       <StartStockingModal
         open={stockingOpen}
         onOpenChange={setStockingOpen}
@@ -126,7 +130,6 @@ export default function PondsPage() {
         onDone={() => window.location.reload()}
       />
 
-      {/* Info dialog */}
       <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -139,7 +142,6 @@ export default function PondsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Confirm dialog */}
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>

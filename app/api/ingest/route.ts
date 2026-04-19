@@ -1,3 +1,4 @@
+//app/api/ingest/route.ts
 // ✅ Make sure this route always runs on the Node runtime (not Edge)
 //    and is never prerendered at build (so env vars are read at runtime).
 export const runtime = 'nodejs';
