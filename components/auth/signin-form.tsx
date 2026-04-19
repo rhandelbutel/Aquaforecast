@@ -16,6 +16,20 @@ interface SignInFormProps {
   onResetClick: () => void
 }
 
+function sanitizeEmailInput(value: string): string {
+  return value
+    .replace(/\s/g, "")
+    .replace(/[^a-zA-Z0-9@._-]/g, "")
+    .slice(0, 30)
+}
+
+function sanitizePasswordInput(value: string): string {
+  return value
+    .replace(/[\u{1F300}-\u{1FAFF}]/gu, "")
+    .replace(/\s/g, "")
+    .slice(0, 25)
+}
+
 export function SignInForm({ onSignUpClick, onResetClick }: SignInFormProps) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -75,7 +89,7 @@ export function SignInForm({ onSignUpClick, onResetClick }: SignInFormProps) {
           type="email"
           placeholder="Enter your email"
           value={email}
-          onChange={(e) => setEmail(e.target.value.slice(0, 30))}
+          onChange={(e) => setEmail(sanitizeEmailInput(e.target.value))}
           maxLength={30}
           required
         />
@@ -89,7 +103,7 @@ export function SignInForm({ onSignUpClick, onResetClick }: SignInFormProps) {
             type={showPassword ? "text" : "password"}
             placeholder="Enter your password"
             value={password}
-            onChange={(e) => setPassword(e.target.value.slice(0, 25))}
+            onChange={(e) => setPassword(sanitizePasswordInput(e.target.value))}
             maxLength={25}
             required
           />

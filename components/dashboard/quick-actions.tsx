@@ -1,3 +1,4 @@
+// components/dashboard/quick-actions.tsx
 "use client"
 
 import { useEffect, useMemo, useState, useRef } from "react"
@@ -14,7 +15,6 @@ import ExportModal from "@/components/export/export-modal"
 
 import type { UnifiedPond } from "@/lib/pond-context"
 import { feedingScheduleService, type FeedingSchedule } from "@/lib/feeding-schedule-service"
-import { subscribeMortalityLogs, type MortalityLog } from "@/lib/mortality-service"
 import { GrowthService } from "@/lib/growth-service"
 import { useAuth } from "@/lib/auth-context"
 import { subscribeUserProfile } from "@/lib/user-service"
@@ -25,8 +25,6 @@ interface QuickActionsProps {
   onMortalityUpdate?: () => void
   onGrowthUpdate?: () => void
 }
-
-const DAY_MS = 86_400_000
 
 export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickActionsProps) {
   const router = useRouter()
@@ -40,45 +38,42 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
 
   const sharedPondId = (pond as any)?.adminPondId || pond?.id
 
-  // ---- User phone badge (Settings) ----
   const [hasPhone, setHasPhone] = useState<boolean | null>(null)
   useEffect(() => {
     if (!user?.uid) return
     const unsub = subscribeUserProfile(user.uid, (p) => {
       setHasPhone(!!(p?.phone && p.phone.trim().length > 0))
     })
-    return () => { try { unsub?.() } catch {} }
+    return () => {
+      try {
+        unsub?.()
+      } catch {}
+    }
   }, [user?.uid])
 
-  // ---- Schedule (for badges) ----
   const [schedule, setSchedule] = useState<FeedingSchedule | null>(null)
   useEffect(() => {
     if (!sharedPondId) return
     const unsub = feedingScheduleService.subscribeByPond(sharedPondId, (s) => setSchedule(s))
-    return () => { try { unsub?.() } catch {} }
+    return () => {
+      try {
+        unsub?.()
+      } catch {}
+    }
   }, [sharedPondId])
 
-  // ---- Live feeding logs (for hiding due badge) ----
   const [logs, setLogs] = useState<FeedingLog[]>([])
   const unsubLogs = useRef<null | (() => void)>(null)
   useEffect(() => {
     if (!sharedPondId) return
     unsubLogs.current?.()
     unsubLogs.current = subscribeFeedingLogs(sharedPondId, (arr) => setLogs(arr))
-    return () => { unsubLogs.current?.(); unsubLogs.current = null }
+    return () => {
+      unsubLogs.current?.()
+      unsubLogs.current = null
+    }
   }, [sharedPondId])
 
-  // ---- Mortality cadence ----
-  const [lastMortalityDate, setLastMortalityDate] = useState<Date | null>(null)
-  useEffect(() => {
-    if (!sharedPondId) return
-    const unsub = subscribeMortalityLogs(sharedPondId, (logs: MortalityLog[]) => {
-      setLastMortalityDate(logs[0]?.date ?? null)
-    })
-    return () => { try { unsub?.() } catch {} }
-  }, [sharedPondId])
-
-  // ---- Growth cadence (NEW) ----
   const [growthDue, setGrowthDue] = useState(false)
   useEffect(() => {
     if (!sharedPondId || !user?.uid) return
@@ -89,26 +84,34 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
         setGrowthDue(GrowthService.canUpdateABW(setup.lastABWUpdate))
       }
     })
-    return () => { try { unsub?.() } catch {} }
+    return () => {
+      try {
+        unsub?.()
+      } catch {}
+    }
   }, [sharedPondId, user?.uid])
 
-  // tick for minute-level badges
   const [nowTick, setNowTick] = useState(() => Date.now())
   useEffect(() => {
     const tick = () => setNowTick(Date.now())
     const id = setInterval(tick, 15000)
-    const onVis = () => { if (document.visibilityState === "visible") tick() }
+    const onVis = () => {
+      if (document.visibilityState === "visible") tick()
+    }
     document.addEventListener("visibilitychange", onVis)
-    return () => { clearInterval(id); document.removeEventListener("visibilitychange", onVis) }
+    return () => {
+      clearInterval(id)
+      document.removeEventListener("visibilitychange", onVis)
+    }
   }, [])
 
-  // feeding helpers
   const makeDateForTime = (hhmm: string, base: Date) => {
     const [hh, mm] = (hhmm || "00:00").split(":").map((v) => Number(v))
     const d = new Date(base)
     d.setHours(hh || 0, mm || 0, 0, 0)
     return d
   }
+
   const dayMatches = (s: FeedingSchedule | null, d: Date) =>
     !s ? false : s.repeatType === "daily" ? true : (s.selectedDays ?? []).includes(d.getDay())
 
@@ -133,7 +136,6 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
     return `${h}:${m}`
   }
 
-  // exact-time FEED badge
   const feedNow = useMemo(() => {
     if (!schedule) return false
     const now = new Date(nowTick)
@@ -142,17 +144,15 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
     return schedule.feedingTimes.some((t) => t === nowHHMM)
   }, [schedule, nowTick])
 
-  // "Due X min" within next 15 min — hides if log already exists
   const dueInMin = useMemo(() => {
     if (feedNow) return null
     const now = new Date(nowTick)
     const next = findNextScheduled(schedule, now)
     if (!next) return null
 
-    // Hide badge if a log already exists near that scheduled time
     const hasLog = logs.some((l) => {
       const fedAt = new Date(l.fedAt).getTime()
-      return Math.abs(fedAt - next.getTime()) < 15 * 60 * 1000 // ±15 min tolerance
+      return Math.abs(fedAt - next.getTime()) < 15 * 60 * 1000
     })
     if (hasLog) return null
 
@@ -160,12 +160,6 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
     const min = Math.ceil(ms / 60000)
     return min > 0 && min <= 15 ? min : null
   }, [schedule, nowTick, feedNow, logs])
-
-  const mortalityDue = useMemo(() => {
-    if (!lastMortalityDate) return true
-    const days = Math.floor((Date.now() - lastMortalityDate.getTime()) / DAY_MS)
-    return days >= 15
-  }, [lastMortalityDate, nowTick])
 
   if (!pond) return null
 
@@ -178,7 +172,6 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4 items-stretch">
-            {/* Feed */}
             <Button
               variant="outline"
               className="relative w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
@@ -199,7 +192,6 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
               )}
             </Button>
 
-            {/* Growth setup with DUE badge */}
             <Button
               variant="outline"
               className="relative w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
@@ -214,7 +206,6 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
               )}
             </Button>
 
-            {/* Schedule feeding */}
             <Button
               variant="outline"
               className="w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
@@ -224,22 +215,15 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
               <span className="text-sm">Schedule Feed</span>
             </Button>
 
-            {/* Mortality log */}
             <Button
               variant="outline"
-              className="relative w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
+              className="w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
               onClick={() => setShowMortalityModal(true)}
             >
               <TrendingDown className="h-6 w-6 text-red-600" />
               <span className="text-sm">Mortality Log</span>
-              {mortalityDue && (
-                <span className="absolute -top-2 -right-2 rounded-full bg-indigo-600 text-white text-[10px] px-2 py-0.5 shadow">
-                  Due
-                </span>
-              )}
             </Button>
 
-            {/* Export */}
             <Button
               variant="outline"
               className="w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
@@ -249,7 +233,6 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
               <span className="text-sm">Export Data</span>
             </Button>
 
-            {/* Settings with red badge if phone missing */}
             <Button
               variant="outline"
               className="relative w-full flex flex-col items-center p-4 h-auto space-y-2 bg-transparent"
@@ -267,16 +250,14 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
         </CardContent>
       </Card>
 
-      {/* Modals */}
-      <FeedingLogModal
-        isOpen={showFeedingModal}
-        onClose={() => setShowFeedingModal(false)}
-      />
+      <FeedingLogModal isOpen={showFeedingModal} onClose={() => setShowFeedingModal(false)} />
+
       <FeedingScheduleModal
         isOpen={showScheduleModal}
         onClose={() => setShowScheduleModal(false)}
         pond={pond}
       />
+
       <MortalityLogModal
         isOpen={showMortalityModal}
         onClose={() => setShowMortalityModal(false)}
@@ -286,6 +267,7 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
           onMortalityUpdate?.()
         }}
       />
+
       <GrowthSetupModal
         isOpen={showGrowthSetupModal}
         onClose={() => setShowGrowthSetupModal(false)}
@@ -296,6 +278,7 @@ export function QuickActions({ pond, onMortalityUpdate, onGrowthUpdate }: QuickA
         }}
         onSuccess={() => setShowGrowthSetupModal(false)}
       />
+
       <ExportModal
         open={showExportModal}
         onCloseAction={() => setShowExportModal(false)}

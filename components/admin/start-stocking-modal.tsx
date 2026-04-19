@@ -1,4 +1,4 @@
-//components/admin/start-stocking-modal.tsx
+// components/admin/start-stocking-modal.tsx
 "use client"
 
 import { useState } from "react"
@@ -9,6 +9,8 @@ import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import type { UnifiedPond } from "@/lib/pond-context"
 import { startNewStocking } from "@/lib/pond-service"
+import { useAuth } from "@/lib/auth-context"
+import { isAdmin } from "@/lib/user-service"
 
 interface Props {
   open: boolean
@@ -18,19 +20,28 @@ interface Props {
 }
 
 export default function StartStockingModal({ open, onOpenChange, pond, onDone }: Props) {
+  const { user } = useAuth()
+
   const [count, setCount] = useState("")
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState("")
 
   const handleSave = async () => {
+    if (!user || !isAdmin(user.email || "")) {
+      setErr("Only administrators can start a new stocking cycle.")
+      return
+    }
+
     const n = Number(count)
     if (!Number.isFinite(n) || n <= 0) {
       setErr("Enter a valid fish count.")
       return
     }
+
     setErr("")
     setSaving(true)
+
     try {
       const sharedId = (pond as any)?.adminPondId || pond.id
       await startNewStocking(sharedId, n, new Date(date))

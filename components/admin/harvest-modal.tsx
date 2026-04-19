@@ -1,4 +1,4 @@
-//components/admin/harvest-modal.tsx
+// components/admin/harvest-modal.tsx
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
@@ -70,7 +70,6 @@ export default function HarvestModal({ open, onOpenChange, ponds, pond, onDone }
         await totalHarvest(targetId)
       }
 
-      // Automatically resolve the “Partial Harvest Recommended” insight
       await resolveDashInsight(targetId, "dash_partial_harvest").catch(() => {})
 
       onOpenChange(false)
@@ -137,7 +136,7 @@ export default function HarvestModal({ open, onOpenChange, ponds, pond, onDone }
 
         {mode === "total" && (
           <div className="rounded-md border bg-amber-50 text-amber-900 text-sm p-3 mt-2">
-            This will reset this pond’s cycle (sets fish alive to 0 and clears related data). This cannot be undone.
+            This will close and archive the current pond cycle, including previous partial harvest records, then reset the pond to empty for a new stocking cycle. This cannot be undone.
           </div>
         )}
 

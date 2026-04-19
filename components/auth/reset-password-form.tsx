@@ -1,40 +1,48 @@
+//auth/reset-password-form.tsx
 "use client"
 
-import { useState } from 'react'
-import { useAuth } from '@/lib/auth-context'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import { ArrowLeft } from 'lucide-react'
+import { useState } from "react"
+import { useAuth } from "@/lib/auth-context"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { ArrowLeft } from "lucide-react"
 
 interface ResetPasswordFormProps {
   onBackClick: () => void
 }
 
+function sanitizeEmailInput(value: string): string {
+  return value
+    .replace(/\s/g, "")
+    .replace(/[^a-zA-Z0-9@._-]/g, "")
+    .slice(0, 30)
+}
+
 export function ResetPasswordForm({ onBackClick }: ResetPasswordFormProps) {
-  const [email, setEmail] = useState('')
+  const [email, setEmail] = useState("")
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [success, setSuccess] = useState('')
+  const [error, setError] = useState("")
+  const [success, setSuccess] = useState("")
   const { resetPassword } = useAuth()
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
-    setError('')
-    setSuccess('')
+    setError("")
+    setSuccess("")
 
     try {
       await resetPassword(email)
-      setSuccess('Password reset email sent! Check your inbox.')
+      setSuccess("Password reset email sent! Check your inbox.")
     } catch (error: any) {
-      if (error.code === 'auth/user-not-found') {
-        setError('No account found with this email address.')
-      } else if (error.code === 'auth/invalid-email') {
-        setError('Invalid email address.')
+      if (error.code === "auth/user-not-found") {
+        setError("No account found with this email address.")
+      } else if (error.code === "auth/invalid-email") {
+        setError("Invalid email address.")
       } else {
-        setError('Failed to send reset email. Please try again.')
+        setError("Failed to send reset email. Please try again.")
       }
     } finally {
       setLoading(false)
@@ -73,18 +81,18 @@ export function ResetPasswordForm({ onBackClick }: ResetPasswordFormProps) {
           type="email"
           placeholder="Enter your email"
           value={email}
-          onChange={(e) => setEmail(e.target.value.slice(0, 30))}
+          onChange={(e) => setEmail(sanitizeEmailInput(e.target.value))}
           maxLength={30}
           required
         />
       </div>
 
-      <Button 
-        type="submit" 
+      <Button
+        type="submit"
         className="w-full bg-cyan-600 hover:bg-cyan-700"
         disabled={loading}
       >
-        {loading ? 'Sending...' : 'Send Reset Email'}
+        {loading ? "Sending..." : "Send Reset Email"}
       </Button>
 
       <div className="text-center">

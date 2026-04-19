@@ -17,6 +17,7 @@ import type { PondData } from "@/lib/pond-service"
 import {
   subscribeMortalityLogs,
   computeSurvivalRateFromLogs,
+  getMortalityRateFromLog,
   type MortalityLog,
 } from "@/lib/mortality-service"
 import { GrowthService, type GrowthHistory } from "@/lib/growth-service"
@@ -88,39 +89,31 @@ function computeSurvivalRiskMultiplier(
 ): number {
   if (ph == null || do_ == null || temp == null) return 1.0
 
-  // Helper to clamp values
   const clamp = (val: number, min: number, max: number) =>
     Math.max(min, Math.min(max, val))
 
   let risk = 1.0
 
-  // --- pH influence (ideal: 6.5–9) ---
   if (ph < 6.5 || ph > 9) {
-    // distance from nearest bound (max 2.0 difference fully penalized)
     const diff = ph < 6.5 ? 6.5 - ph : ph - 9
-    const penalty = clamp(diff / 2, 0, 1) * 0.4 // up to -40%
+    const penalty = clamp(diff / 2, 0, 1) * 0.4
     risk *= 1 - penalty
   }
 
-  // --- DO influence (ideal: 3–5) ---
   if (do_ < 3 || do_ > 5) {
-    // DO below 3 or above 5 is critical (up to -60%)
     const diff = do_ < 3 ? 3 - do_ : do_ - 5
-    const penalty = clamp(diff / 2, 0, 1) * 0.6 // up to -60%
+    const penalty = clamp(diff / 2, 0, 1) * 0.6
     risk *= 1 - penalty
   }
 
-  // --- Temperature influence (ideal: 28–31°C) ---
   if (temp < 28 || temp > 31) {
     const diff = temp < 28 ? 28 - temp : temp - 31
-    const penalty = clamp(diff / 5, 0, 1) * 0.3 // up to -30%
+    const penalty = clamp(diff / 5, 0, 1) * 0.3
     risk *= 1 - penalty
   }
 
-  // Prevent multiplier from going below 0.1 (total collapse)
   return clamp(risk, 0.1, 1.0)
 }
-
 
 /* ---------------------------------------------------
    Core dynamic forecast generator
@@ -206,7 +199,10 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
   const sharedPondId = (pond as any)?.adminPondId || pond.id
   const [survivalPct, setSurvivalPct] = useState<number | null>(null)
   const [mortLogs, setMortLogs] = useState<MortalityLog[]>([])
-  const initialStocked = pond.fishCount || 0
+  const initialStocked =
+    typeof (pond as any)?.initialFishCount === "number"
+      ? (pond as any).initialFishCount
+      : pond.fishCount || 0
   const [currentABW, setCurrentABW] = useState<number | null>(null)
   const [targetWeight, setTargetWeight] = useState<number | null>(null)
   const [history, setHistory] = useState<GrowthHistory[]>([])
@@ -217,7 +213,7 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
 
     const unsubMort = subscribeMortalityLogs(sharedPondId, (logs) => {
       setMortLogs(logs)
-      setSurvivalPct(computeSurvivalRateFromLogs(logs)) // latest computed survival
+      setSurvivalPct(computeSurvivalRateFromLogs(logs, initialStocked))
     })
 
     const unsubSetup = GrowthService.subscribeGrowthSetup(sharedPondId, (setup) => {
@@ -239,7 +235,7 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
       unsubSetup()
       unsubHist()
     }
-  }, [sharedPondId])
+  }, [sharedPondId, initialStocked])
 
   const hasHistory = history.length > 0
 
@@ -301,56 +297,48 @@ export function GrowthCharts({ pond }: GrowthChartsProps) {
     return rows
   }, [hasHistory, actualSeries, predictedSeries, liveForecastSeries])
 
-
-    /* --------------------------------------------
+  /* --------------------------------------------
      SURVIVAL curve (historical + live forecast)
      -------------------------------------------- */
-const survivalCurveData = useMemo(() => {
-  if (mortLogs.length === 0)
-    return [{ label: "No Data", survival: 100 }]
+  const survivalCurveData = useMemo(() => {
+    if (mortLogs.length === 0) return [{ label: "No Data", survival: 100 }]
 
-  const chrono = [...mortLogs].sort(
-    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
-  )
+    const chrono = [...mortLogs].sort(
+      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+    )
 
-  const rows: { label: string; survival: number }[] = []
-  let cumulative = 0
-  for (const log of chrono) {
-    const add = log.mortalityRate
-      ? Math.max(0, Math.min(100, log.mortalityRate))
-      : 0
-    cumulative = Math.min(100, cumulative + add)
-    const survival = Math.max(0, 100 - cumulative)
-    const d = new Date(log.date)
+    const rows: { label: string; survival: number }[] = []
+    let cumulative = 0
+    for (const log of chrono) {
+      const add = getMortalityRateFromLog(log, initialStocked)
+      cumulative = Math.min(100, cumulative + add)
+      const survival = Math.max(0, 100 - cumulative)
+      const d = new Date(log.date)
 
-    // --- Updated: make the latest log show "Now" ---
-    let label: string
-    if (log === chrono[chrono.length - 1]) {
-      label = "Now"
-    } else {
-      label = d.toLocaleDateString(undefined, {
-        month: "short",
-        day: "numeric",
-      })
+      let label: string
+      if (log === chrono[chrono.length - 1]) {
+        label = "Now"
+      } else {
+        label = d.toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+        })
+      }
+
+      rows.push({ label, survival })
     }
-
-    rows.push({ label, survival })
-  }
-  return rows
-}, [mortLogs])
-
+    return rows
+  }, [mortLogs, initialStocked])
 
   const liveSurvivalForecastData = useMemo(() => {
-    if (typeof survivalPct !== "number" || survivalCurveData.length === 0)
-      return []
+    if (typeof survivalPct !== "number" || survivalCurveData.length === 0) return []
 
-    // Base survival is the latest computed one from logs
     const base = survivalPct
     const lastLogLabel = survivalCurveData[survivalCurveData.length - 1].label
 
     const { ph, do: doVal, temp } = sensorData || {}
     const risk = computeSurvivalRiskMultiplier(ph ?? null, doVal ?? null, temp ?? null)
-    const softRisk = 1 - ((1 - risk) / 7) // gradual drop rate
+    const softRisk = 1 - ((1 - risk) / 7)
 
     const rows: { label: string; survival: number }[] = []
     let projected = base
@@ -362,10 +350,8 @@ const survivalCurveData = useMemo(() => {
       rows.push({ label: futureLabel, survival: projected })
     }
 
-    // Combine with the last log point for continuous line
     return [{ label: lastLogLabel, survival: base }, ...rows]
   }, [survivalPct, survivalCurveData, sensorData])
-
 
   /* --------------------------------------------
      SENSOR STATUS
@@ -377,7 +363,7 @@ const survivalCurveData = useMemo(() => {
     const { ph, do: doVal, temp } = sensorData
     const mPct = Math.round(multiplier * 100)
     const ok = (v: boolean) => (v ? "text-green-600" : "text-red-500")
-   const phOk = ph != null && ph >= 6.5 && ph <= 9
+    const phOk = ph != null && ph >= 6.5 && ph <= 9
     const doOk = doVal != null && doVal >= 3 && doVal <= 5
     const tempOk = temp != null && temp >= 28 && temp <= 31
 
@@ -399,7 +385,6 @@ const survivalCurveData = useMemo(() => {
      -------------------------------------------- */
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      {/* Growth Prediction */}
       <Card>
         <CardHeader>
           <CardTitle>Fish Growth Prediction - {pond.name}</CardTitle>
@@ -416,7 +401,8 @@ const survivalCurveData = useMemo(() => {
         <CardContent>
           {!hasHistory ? (
             <div className="text-sm text-gray-500">
-              No growth measurements recorded yet. Add your first ABW in <b>Growth Setup</b> to see predictions.
+              No growth measurements recorded yet. Add your first ABW in <b>Growth Setup</b> to
+              see predictions.
             </div>
           ) : (
             <ResponsiveContainer width="100%" height={320}>
@@ -425,16 +411,36 @@ const survivalCurveData = useMemo(() => {
                 <XAxis dataKey="label" />
                 <YAxis />
                 <Tooltip formatter={(v, n) => [`${Number(v).toFixed(2)} g`, n]} />
-                <Line type="monotone" dataKey="actual" stroke="#0891b2" strokeWidth={2.5} name="Actual ABW" dot={{ r: 3 }} />
-                <Line type="monotone" dataKey="predicted" stroke="#059669" strokeWidth={1.5} name="Optimal Growth" dot={{ r: 2 }} />
-                <Line type="monotone" dataKey="liveForecast" stroke="#f59e0b" strokeWidth={1.5} name="Live Growth Forecast" dot={{ r: 2 }} />
+                <Line
+                  type="monotone"
+                  dataKey="actual"
+                  stroke="#0891b2"
+                  strokeWidth={2.5}
+                  name="Actual ABW"
+                  dot={{ r: 3 }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="predicted"
+                  stroke="#059669"
+                  strokeWidth={1.5}
+                  name="Optimal Growth"
+                  dot={{ r: 2 }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="liveForecast"
+                  stroke="#f59e0b"
+                  strokeWidth={1.5}
+                  name="Live Growth Forecast"
+                  dot={{ r: 2 }}
+                />
               </LineChart>
             </ResponsiveContainer>
           )}
         </CardContent>
       </Card>
 
-      {/* Survival Curve */}
       <Card>
         <CardHeader>
           <CardTitle>Survival Rate Curve - {pond.name}</CardTitle>
@@ -443,34 +449,31 @@ const survivalCurveData = useMemo(() => {
           </p>
         </CardHeader>
         <CardContent>
-  <ResponsiveContainer width="100%" height={320}>
-    <AreaChart>
-      <CartesianGrid strokeDasharray="3 3" />
-      <XAxis dataKey="label" />
-      <YAxis domain={[0, 100]} />
-      <Tooltip formatter={(v: any) => [`${v.toFixed(1)}%`, "Survival"]} />
-      {/* Historical Data */}
-      <Area
-        dataKey="survival"
-        data={survivalCurveData}
-        stroke="#2563eb"
-        fill="#2563eb"
-        fillOpacity={0.3}
-        name="Historical"
-      />
-      {/* Forecast Data */}
-      <Area
-        dataKey="survival"
-        data={liveSurvivalForecastData}
-        stroke="#f59e0b"
-        fill="#2563eb"
-        fillOpacity={0.25}
-        name="Forecast"
-      />
-    </AreaChart>
-  </ResponsiveContainer>
-</CardContent>
-
+          <ResponsiveContainer width="100%" height={320}>
+            <AreaChart>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="label" />
+              <YAxis domain={[0, 100]} />
+              <Tooltip formatter={(v: any) => [`${v.toFixed(1)}%`, "Survival"]} />
+              <Area
+                dataKey="survival"
+                data={survivalCurveData}
+                stroke="#2563eb"
+                fill="#2563eb"
+                fillOpacity={0.3}
+                name="Historical"
+              />
+              <Area
+                dataKey="survival"
+                data={liveSurvivalForecastData}
+                stroke="#f59e0b"
+                fill="#2563eb"
+                fillOpacity={0.25}
+                name="Forecast"
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </CardContent>
       </Card>
     </div>
   )
